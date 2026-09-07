@@ -2427,6 +2427,12 @@ function BusinessPage({ token, allowedActions }) {
                                       <p className="user-detail-value">{sub.billing_cycle}</p>
                                     </div>
                                   ) : null}
+                                  {sub?.selected_duration_months || sub?.selectedDurationMonths ? (
+                                    <div className="user-detail-card">
+                                      <p className="user-detail-label">Purchased Duration</p>
+                                      <p className="user-detail-value">{sub.selected_duration_months || sub.selectedDurationMonths} months</p>
+                                    </div>
+                                  ) : null}
                                   {sub?.plan?.duration ? (
                                     <div className="user-detail-card">
                                       <p className="user-detail-label">Duration</p>
