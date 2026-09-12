@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Banner } from '../components';
+import { Banner, SearchableSelect } from '../components';
 import {
   createProduct,
   createUom,
-  fetchUsers,
+  fetchBusinesses,
   listAttributeDefinitions,
   listAttributeMappings,
   listBrandOptions,
@@ -117,6 +117,11 @@ const FORM_FIELD_TAB_MAP = {
 
 const ADMIN_API_BASE = API_ORIGIN;
 
+const PRODUCT_TYPE_OPTIONS = [
+  { value: 'Physical', label: 'Physical' },
+  { value: 'Digital', label: 'Digital' },
+];
+
 /* ── Helpers ──────────────────────────────────────────────────── */
 const normalize = (v) => String(v || '').toLowerCase();
 const normalizeDynamicKey = (v) =>
@@ -135,8 +140,6 @@ const resolveMediaUrl = (v) => {
 const parseList = (v) =>
   String(v || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
 
-const isBusinessAccount = (u) =>
-  String(u?.userType || u?.type || u?.role || '').trim().toUpperCase() === 'BUSINESS';
 const getBusinessName = (u) =>
   u?.businessName || u?.companyName || u?.name || u?.fullName || u?.mobile || `Business #${u?.id || ''}`;
 
@@ -153,16 +156,40 @@ const createUomConversionEntry = () => ({
   uomId: '', conversionFactor: '',
 });
 
-function validateField(key, value) {
+function validateField(key, value, formState = {}) {
   const v = String(value ?? '').trim();
   switch (key) {
     case 'userId':         return !v ? 'Select a business account.' : null;
     case 'mainCategoryId': return !v ? 'Select a main category.' : null;
     case 'categoryId':     return !v ? 'Select a category.' : null;
     case 'productName':    return !v ? 'Product name is required.' : v.length < 2 ? 'Min 2 characters.' : null;
-    case 'sellingPrice':   return !v ? 'Selling price is required.' : isNaN(Number(v)) || Number(v) <= 0 ? 'Enter a valid price.' : null;
-    case 'mrp':            return !v ? 'MRP is required.' : isNaN(Number(v)) || Number(v) <= 0 ? 'Enter a valid MRP.' : null;
-    case 'gstRate':        return !v ? 'GST rate is required.' : isNaN(Number(v)) ? 'Enter a valid number.' : null;
+    case 'sellingPrice': {
+      if (!v) return 'Selling price is required.';
+      const sp = Number(v);
+      if (isNaN(sp) || sp <= 0) return 'Enter a valid price.';
+      const mrpRaw = formState.mrp;
+      if (mrpRaw !== undefined && mrpRaw !== null && String(mrpRaw).trim() !== '') {
+        const mrp = Number(mrpRaw);
+        if (!isNaN(mrp) && mrp > 0 && sp > mrp) {
+          return 'Selling price cannot exceed MRP.';
+        }
+      }
+      return null;
+    }
+    case 'mrp': {
+      if (!v) return 'MRP is required.';
+      const mrp = Number(v);
+      if (isNaN(mrp) || mrp <= 0) return 'Enter a valid MRP.';
+      const spRaw = formState.sellingPrice;
+      if (spRaw !== undefined && spRaw !== null && String(spRaw).trim() !== '') {
+        const sp = Number(spRaw);
+        if (!isNaN(sp) && sp > 0 && sp > mrp) {
+          return 'MRP cannot be less than Selling Price.';
+        }
+      }
+      return null;
+    }
+    case 'gstRate':        return !v ? 'GST rate is required.' : isNaN(Number(v)) || Number(v) < 0 ? 'Enter a valid GST rate.' : null;
     default: return null;
   }
 }
@@ -256,8 +283,12 @@ function ProductCreatePage({ token }) {
   const [form, setForm] = useState(INITIAL_FORM);
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
+  const formRef = useRef(INITIAL_FORM);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
   const [isSaving, setIsSaving] = useState(false);
-  const [submitMode, setSubmitMode] = useState('draft');
+  const [submitMode, setSubmitMode] = useState('submit');
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
   const [message, setMessage] = useState({ type: 'info', text: '' });
   useEffect(() => {
@@ -272,6 +303,7 @@ function ProductCreatePage({ token }) {
 
   /* ── Reference data ──────────────────────────────────────── */
   const [businesses, setBusinesses] = useState([]);
+  const [isLoadingBusinesses, setIsLoadingBusinesses] = useState(true);
   const [mainCategories, setMainCategories] = useState([]);
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
@@ -296,20 +328,35 @@ function ProductCreatePage({ token }) {
 
   /* ── Load all reference data on mount ───────────────────── */
   useEffect(() => {
+    setIsLoadingBusinesses(true);
+    fetchBusinesses(token)
+      .then((res) => {
+        const raw = res?.data?.businesses || res?.data || [];
+        const list = Array.isArray(raw) ? raw : [];
+        setBusinesses(list);
+
+        // Auto-select business if prefilledBusinessId is set (from Business View page)
+        if (prefilledBusinessId) {
+          const match = list.find((u) => String(u?.id) === prefilledBusinessId);
+          if (match) {
+            setForm((prev) => ({ ...prev, userId: prefilledBusinessId }));
+            setTouched((prev) => ({ ...prev, userId: true }));
+          }
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load businesses:', err);
+      })
+      .finally(() => {
+        setIsLoadingBusinesses(false);
+      });
+
     Promise.allSettled([
-      fetchUsers(token),
       listMainCategories(token),
       listBrandOptions(token),
       listUoms(token),
       listAttributeDefinitions(token, true),
-    ]).then(([usersRes, mainCatRes, brandsRes, uomsRes, defsRes]) => {
-      if (usersRes.status === 'fulfilled') {
-        const all = Array.isArray(usersRes.value?.data) ? usersRes.value.data : [];
-        setBusinesses(
-          all.filter(isBusinessAccount)
-            .sort((a, b) => getBusinessName(a).localeCompare(getBusinessName(b)))
-        );
-      }
+    ]).then(([mainCatRes, brandsRes, uomsRes, defsRes]) => {
       if (mainCatRes.status === 'fulfilled')
         setMainCategories(mainCatRes.value?.data || []);
       if (brandsRes.status === 'fulfilled')
@@ -320,18 +367,8 @@ function ProductCreatePage({ token }) {
       }
       if (defsRes.status === 'fulfilled')
         setAttributeDefinitions(defsRes.value?.data?.definitions || []);
-
-      // Auto-select business if prefilledBusinessId is set (from Business View page)
-      if (prefilledBusinessId && usersRes.status === 'fulfilled') {
-        const all = Array.isArray(usersRes.value?.data) ? usersRes.value.data : [];
-        const match = all.find((u) => String(u?.id) === prefilledBusinessId);
-        if (match) {
-          setForm((prev) => ({ ...prev, userId: prefilledBusinessId }));
-          setTouched((prev) => ({ ...prev, userId: true }));
-        }
-      }
     });
-  }, [token]);
+  }, [token, prefilledBusinessId]);
 
   /* ── Cascade: main category → categories ────────────────── */
   useEffect(() => {
@@ -403,19 +440,89 @@ function ProductCreatePage({ token }) {
   void definitionByKey;
 
   const handleChange = useCallback((key, value) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    setTouched((prev) => ({ ...prev, [key]: true }));
-    const err = validateField(key, value);
-    setErrors((prev) => ({ ...prev, [key]: err || undefined }));
+    const nextForm = { ...formRef.current, [key]: value };
+    formRef.current = nextForm;
+    setForm(nextForm);
+
+    setTouched((prev) => {
+      const nextTouched = { ...prev, [key]: true };
+      if (key === 'sellingPrice' || key === 'mrp') {
+        const otherKey = key === 'sellingPrice' ? 'mrp' : 'sellingPrice';
+        if (nextForm[otherKey] !== '' && nextForm[otherKey] !== undefined) {
+          nextTouched[otherKey] = true;
+        }
+      }
+      return nextTouched;
+    });
+
+    const err = validateField(key, value, nextForm);
+    let companionErr = undefined;
+    let companionKey = null;
+    if (key === 'sellingPrice' || key === 'mrp') {
+      companionKey = key === 'sellingPrice' ? 'mrp' : 'sellingPrice';
+      if (nextForm[companionKey] !== '' && nextForm[companionKey] !== undefined) {
+        companionErr = validateField(companionKey, nextForm[companionKey], nextForm) || undefined;
+      }
+    }
+
+    setErrors((prev) => {
+      const nextErrors = { ...prev };
+      if (err) {
+        nextErrors[key] = err;
+      } else {
+        delete nextErrors[key];
+      }
+      if (companionKey) {
+        if (companionErr) {
+          nextErrors[companionKey] = companionErr;
+        } else {
+          delete nextErrors[companionKey];
+        }
+      }
+      return nextErrors;
+    });
   }, []);
 
   const handleBlur = useCallback((key) => {
-    setTouched((prev) => ({ ...prev, [key]: true }));
-    setErrors((prev) => ({
-      ...prev,
-      [key]: validateField(key, form[key]) || undefined,
-    }));
-  }, [form]);
+    const currentForm = formRef.current;
+    setTouched((prev) => {
+      const nextTouched = { ...prev, [key]: true };
+      if (key === 'sellingPrice' || key === 'mrp') {
+        const otherKey = key === 'sellingPrice' ? 'mrp' : 'sellingPrice';
+        if (currentForm[otherKey] !== '' && currentForm[otherKey] !== undefined) {
+          nextTouched[otherKey] = true;
+        }
+      }
+      return nextTouched;
+    });
+
+    const err = validateField(key, currentForm[key], currentForm);
+    let companionErr = undefined;
+    let companionKey = null;
+    if (key === 'sellingPrice' || key === 'mrp') {
+      companionKey = key === 'sellingPrice' ? 'mrp' : 'sellingPrice';
+      if (currentForm[companionKey] !== '' && currentForm[companionKey] !== undefined) {
+        companionErr = validateField(companionKey, currentForm[companionKey], currentForm) || undefined;
+      }
+    }
+
+    setErrors((prev) => {
+      const nextErrors = { ...prev };
+      if (err) {
+        nextErrors[key] = err;
+      } else {
+        delete nextErrors[key];
+      }
+      if (companionKey) {
+        if (companionErr) {
+          nextErrors[companionKey] = companionErr;
+        } else {
+          delete nextErrors[companionKey];
+        }
+      }
+      return nextErrors;
+    });
+  }, []);
 
   const handleDynamicChange = (key, value) => {
     setDynamicValues((prev) => ({ ...prev, [key]: value }));
@@ -431,10 +538,66 @@ function ProductCreatePage({ token }) {
     ? (selectedBaseUom.uomCode ? `${selectedBaseUom.uomName} (${selectedBaseUom.uomCode})` : selectedBaseUom.uomName)
     : '';
 
-  const uomOptions = uoms.map((u) => ({
-    value: String(u.id),
-    label: u.uomCode ? `${u.uomName} (${u.uomCode})` : u.uomName,
-  }));
+  const businessOptions = useMemo(() => {
+    return businesses.map((b) => {
+      const name = getBusinessName(b);
+      const mobile = b.mobile || b.phone || b.businessProfile?.mobile;
+      const city = b.businessProfile?.cityCode || b.cityCode;
+      const subParts = [];
+      if (mobile) subParts.push(mobile);
+      if (city) subParts.push(city);
+      return {
+        value: String(b.id),
+        label: name,
+        subLabel: subParts.length ? subParts.join(' · ') : undefined,
+        badge: `ID: ${b.id}`,
+        searchText: `${name} ${mobile || ''} ${city || ''} ${b.id} ${b.email || ''}`,
+      };
+    });
+  }, [businesses]);
+
+  const mainCategoryOptions = useMemo(() => {
+    return [...mainCategories]
+      .sort((a, b) => {
+        const indA = a.industryName || a.industry?.name || '';
+        const indB = b.industryName || b.industry?.name || '';
+        const cmp = indA.localeCompare(indB);
+        if (cmp !== 0) return cmp;
+        return (a.name || '').localeCompare(b.name || '');
+      })
+      .map((c) => {
+        const indName = c.industryName || c.industry?.name || '';
+        return {
+          value: String(c.id),
+          label: indName ? `${indName} › ${c.name}` : c.name,
+          subLabel: indName ? `Industry: ${indName}` : undefined,
+          badge: indName || undefined,
+          searchText: `${indName} ${c.name}`,
+        };
+      });
+  }, [mainCategories]);
+
+  const categoryOptions = useMemo(() => {
+    return categories.map((c) => ({
+      value: String(c.id),
+      label: c.name,
+    }));
+  }, [categories]);
+
+  const subCategoryOptions = useMemo(() => {
+    return subCategories.map((c) => ({
+      value: String(c.id),
+      label: c.name,
+    }));
+  }, [subCategories]);
+
+  const uomOptions = useMemo(() => {
+    return uoms.map((u) => ({
+      value: String(u.id),
+      label: u.uomCode ? `${u.uomName} (${u.uomCode})` : u.uomName,
+      badge: u.uomCode || undefined,
+    }));
+  }, [uoms]);
 
   const combinedUomOptions = useMemo(() => {
     const base = form.baseUomId
@@ -599,23 +762,32 @@ function ProductCreatePage({ token }) {
       return (
         <div className="bc-field" key={mapping.id || mapping.attributeKey}>
           <label className="bc-field-label">{label}</label>
-          <select value={bv} onChange={(e) => handleDynamicChange(mapping.attributeKey, e.target.value)} required={mapping.required}>
-            <option value="">Select</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
+          <SearchableSelect
+            value={bv}
+            onChange={(v) => handleDynamicChange(mapping.attributeKey, v)}
+            options={[
+              { value: 'true', label: 'Yes' },
+              { value: 'false', label: 'No' },
+            ]}
+            placeholder="Select"
+            clearable={!mapping.required}
+          />
           {hint ? <span className="bc-hint">{hint}</span> : null}
         </div>
       );
     }
     if (type === 'ENUM' && Array.isArray(options)) {
+      const enumOpts = options.map((o) => ({ value: String(o), label: String(o) }));
       return (
         <div className="bc-field" key={mapping.id || mapping.attributeKey}>
           <label className="bc-field-label">{label}</label>
-          <select value={value} onChange={(e) => handleDynamicChange(mapping.attributeKey, e.target.value)} required={mapping.required}>
-            <option value="">Select</option>
-            {options.map((o) => <option key={o} value={o}>{o}</option>)}
-          </select>
+          <SearchableSelect
+            value={value}
+            onChange={(v) => handleDynamicChange(mapping.attributeKey, v)}
+            options={enumOpts}
+            placeholder="Select"
+            clearable={!mapping.required}
+          />
           {hint ? <span className="bc-hint">{hint}</span> : null}
         </div>
       );
@@ -663,7 +835,7 @@ function ProductCreatePage({ token }) {
     Object.keys(INITIAL_FORM).forEach((k) => { allTouched[k] = true; });
     const allErrors = {};
     Object.keys(INITIAL_FORM).forEach((k) => {
-      const err = validateField(k, form[k]);
+      const err = validateField(k, form[k], form);
       if (err) allErrors[k] = err;
     });
     setTouched(allTouched);
@@ -673,6 +845,17 @@ function ProductCreatePage({ token }) {
       const firstKey = Object.keys(allErrors)[0];
       setActiveTab(FORM_FIELD_TAB_MAP[firstKey] || 'general');
       setMessage({ type: 'error', text: 'Please fix the highlighted errors before submitting.' });
+      return;
+    }
+
+    const invalidVariantIdx = variants.findIndex((v) => {
+      const vSp = v.sellingPrice !== '' && v.sellingPrice !== undefined ? Number(v.sellingPrice) : null;
+      const vMrp = v.mrp !== '' && v.mrp !== undefined ? Number(v.mrp) : null;
+      return vSp !== null && vMrp !== null && !isNaN(vSp) && !isNaN(vMrp) && vSp > 0 && vMrp > 0 && vSp > vMrp;
+    });
+    if (invalidVariantIdx >= 0) {
+      setActiveTab('pricing');
+      setMessage({ type: 'error', text: `Variant ${invalidVariantIdx + 1}: Selling price cannot exceed MRP.` });
       return;
     }
 
@@ -729,7 +912,7 @@ function ProductCreatePage({ token }) {
         weight: form.weight ? Number(form.weight) : 0.5,
         thumbnailImage: form.thumbnailImage.trim() || '',
         galleryImages: parseList(form.galleryImagesText),
-        approvalStatus: mode === 'submit' ? 'PENDING_REVIEW' : 'DRAFT',
+        approvalStatus: mode === 'draft' ? 'DRAFT' : 'APPROVED',
       };
 
       const licenseDocuments = parseList(form.licenseDocumentsText);
@@ -788,9 +971,9 @@ function ProductCreatePage({ token }) {
       await createProduct(token, payload);
       navigate('/admin/products', {
         state: {
-          success: mode === 'submit'
-            ? `Product "${form.productName}" created and submitted for review.`
-            : `Product "${form.productName}" saved as draft.`,
+          success: mode === 'draft'
+            ? `Product "${form.productName}" saved as draft.`
+            : `Product "${form.productName}" published and approved successfully.`,
         },
       });
     } catch (err) {
@@ -870,31 +1053,51 @@ function ProductCreatePage({ token }) {
                 </div>
                 <div className="pcc-fgrid pcc-fgrid-setup">
                   <Field label="Business Account" required error={errors.userId} touched={touched.userId}>
-                    <select {...inp('userId')} disabled={Boolean(prefilledBusinessId && form.userId === prefilledBusinessId)}>
-                      <option value="">Select business account</option>
-                      {businesses.map((business) => <option key={business.id} value={business.id}>{getBusinessName(business)}</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={form.userId}
+                      onChange={(val) => handleChange('userId', val)}
+                      options={businessOptions}
+                      placeholder={isLoadingBusinesses ? 'Loading businesses...' : 'Select business account'}
+                      searchPlaceholder="Search business by name, mobile, ID..."
+                      disabled={Boolean(prefilledBusinessId && form.userId === prefilledBusinessId)}
+                      hasError={Boolean(errors.userId && touched.userId)}
+                      isLoading={isLoadingBusinesses}
+                      loadingLabel="Loading businesses..."
+                    />
                     {prefilledBusinessId && form.userId === prefilledBusinessId ? (
                       <span className="bc-hint">Pre-selected from Business View page</span>
                     ) : null}
                   </Field>
                   <Field label="Main Category" required error={errors.mainCategoryId} touched={touched.mainCategoryId}>
-                    <select {...inp('mainCategoryId')}>
-                      <option value="">Select main category</option>
-                      {mainCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={form.mainCategoryId}
+                      onChange={(val) => handleChange('mainCategoryId', val)}
+                      options={mainCategoryOptions}
+                      placeholder="Select main category"
+                      searchPlaceholder="Search main category..."
+                      hasError={Boolean(errors.mainCategoryId && touched.mainCategoryId)}
+                    />
                   </Field>
                   <Field label="Category" required error={errors.categoryId} touched={touched.categoryId}>
-                    <select {...inp('categoryId')} disabled={!form.mainCategoryId}>
-                      <option value="">{form.mainCategoryId ? 'Select category' : 'Select main category first'}</option>
-                      {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={form.categoryId}
+                      onChange={(val) => handleChange('categoryId', val)}
+                      options={categoryOptions}
+                      placeholder={form.mainCategoryId ? 'Select category' : 'Select main category first'}
+                      searchPlaceholder="Search category..."
+                      disabled={!form.mainCategoryId}
+                      hasError={Boolean(errors.categoryId && touched.categoryId)}
+                    />
                   </Field>
                   <Field label="Sub-category">
-                    <select {...inp('subCategoryId')} disabled={!form.categoryId}>
-                      <option value="">{form.categoryId ? 'All sub-categories (optional)' : 'Select category first'}</option>
-                      {subCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={form.subCategoryId}
+                      onChange={(val) => handleChange('subCategoryId', val)}
+                      options={subCategoryOptions}
+                      placeholder={form.categoryId ? 'All sub-categories (optional)' : 'Select category first'}
+                      searchPlaceholder="Search sub-category..."
+                      disabled={!form.categoryId}
+                    />
                   </Field>
                 </div>
               </div>
@@ -904,10 +1107,13 @@ function ProductCreatePage({ token }) {
                 <input type="text" placeholder="Enter product name" {...inp('productName')} />
               </Field>
               <Field label="Product Type">
-                <select {...inp('productType')}>
-                  <option value="Physical">Physical</option>
-                  <option value="Digital">Digital</option>
-                </select>
+                <SearchableSelect
+                  value={form.productType}
+                  onChange={(val) => handleChange('productType', val)}
+                  options={PRODUCT_TYPE_OPTIONS}
+                  placeholder="Select Product Type"
+                  clearable={false}
+                />
               </Field>
               <Field label="Brand Name">
                 <BrandAutocomplete value={form.brandName} onChange={(v) => handleChange('brandName', v)} brands={brands} />
@@ -975,28 +1181,47 @@ function ProductCreatePage({ token }) {
             <>
               <div className="pcc-fgrid">
                 <Field label="Business Account" required error={errors.userId} touched={touched.userId} span2>
-                  <select {...inp('userId')}>
-                    <option value="">— Select business —</option>
-                    {businesses.map((b) => <option key={b.id} value={b.id}>{getBusinessName(b)}</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.userId}
+                    onChange={(val) => handleChange('userId', val)}
+                    options={businessOptions}
+                    placeholder={isLoadingBusinesses ? 'Loading businesses...' : 'Select business account'}
+                    searchPlaceholder="Search business by name, mobile, ID..."
+                    hasError={Boolean(errors.userId && touched.userId)}
+                    isLoading={isLoadingBusinesses}
+                    loadingLabel="Loading businesses..."
+                  />
                 </Field>
                 <Field label="Main Category" required error={errors.mainCategoryId} touched={touched.mainCategoryId}>
-                  <select {...inp('mainCategoryId')}>
-                    <option value="">— Select main category —</option>
-                    {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.mainCategoryId}
+                    onChange={(val) => handleChange('mainCategoryId', val)}
+                    options={mainCategoryOptions}
+                    placeholder="Select main category"
+                    searchPlaceholder="Search main category..."
+                    hasError={Boolean(errors.mainCategoryId && touched.mainCategoryId)}
+                  />
                 </Field>
                 <Field label="Category" required error={errors.categoryId} touched={touched.categoryId}>
-                  <select {...inp('categoryId')} disabled={!form.mainCategoryId}>
-                    <option value="">{form.mainCategoryId ? '— Select category —' : 'Select main category first'}</option>
-                    {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.categoryId}
+                    onChange={(val) => handleChange('categoryId', val)}
+                    options={categoryOptions}
+                    placeholder={form.mainCategoryId ? 'Select category' : 'Select main category first'}
+                    searchPlaceholder="Search category..."
+                    disabled={!form.mainCategoryId}
+                    hasError={Boolean(errors.categoryId && touched.categoryId)}
+                  />
                 </Field>
                 <Field label="Sub-category">
-                  <select {...inp('subCategoryId')} disabled={!form.categoryId}>
-                    <option value="">{form.categoryId ? 'All sub-categories (optional)' : 'Select category first'}</option>
-                    {subCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.subCategoryId}
+                    onChange={(val) => handleChange('subCategoryId', val)}
+                    options={subCategoryOptions}
+                    placeholder={form.categoryId ? 'All sub-categories (optional)' : 'Select category first'}
+                    searchPlaceholder="Search sub-category..."
+                    disabled={!form.categoryId}
+                  />
                 </Field>
               </div>
               {selectedBusiness || selectedMainCat ? (
@@ -1189,10 +1414,18 @@ function ProductCreatePage({ token }) {
               ) : null}
               <div className="pcc-fgrid">
                 <Field label="Base UOM" hint="Selling price is per 1 unit of this UOM">
-                  <select value={form.baseUomId} onChange={(e) => { handleChange('baseUomId', e.target.value); setUomConversions([]); handleChange('defaultStockInUomId', ''); handleChange('defaultStockOutUomId', ''); }}>
-                    <option value="">{uoms.length === 0 ? 'No UOMs — create one above' : '— Select base UOM —'}</option>
-                    {uomOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.baseUomId}
+                    onChange={(val) => {
+                      handleChange('baseUomId', val);
+                      setUomConversions([]);
+                      handleChange('defaultStockInUomId', '');
+                      handleChange('defaultStockOutUomId', '');
+                    }}
+                    options={uomOptions}
+                    placeholder={uoms.length === 0 ? 'No UOMs — create one above' : 'Select base UOM'}
+                    searchPlaceholder="Search base UOM..."
+                  />
                 </Field>
               </div>
               {form.baseUomId ? (
@@ -1244,16 +1477,22 @@ function ProductCreatePage({ token }) {
                   {uomConversions.length > 0 ? (
                     <div className="pcc-fgrid" style={{ marginTop: 16 }}>
                       <Field label="Default UOM for Stock In" required>
-                        <select value={form.defaultStockInUomId} onChange={(e) => handleChange('defaultStockInUomId', e.target.value)}>
-                          <option value="">Select UOM</option>
-                          {combinedUomOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={form.defaultStockInUomId}
+                          onChange={(val) => handleChange('defaultStockInUomId', val)}
+                          options={combinedUomOptions}
+                          placeholder="Select UOM"
+                          searchPlaceholder="Search UOM..."
+                        />
                       </Field>
                       <Field label="Default UOM for Stock Out" required>
-                        <select value={form.defaultStockOutUomId} onChange={(e) => handleChange('defaultStockOutUomId', e.target.value)}>
-                          <option value="">Select UOM</option>
-                          {combinedUomOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={form.defaultStockOutUomId}
+                          onChange={(val) => handleChange('defaultStockOutUomId', val)}
+                          options={combinedUomOptions}
+                          placeholder="Select UOM"
+                          searchPlaceholder="Search UOM..."
+                        />
                       </Field>
                     </div>
                   ) : null}
@@ -1271,6 +1510,9 @@ function ProductCreatePage({ token }) {
                   {variants.map((v, idx) => {
                     const varThumb = resolveMediaUrl(v.thumbnailImage);
                     const varGallery = parseList(v.galleryImagesText).map(resolveMediaUrl).filter(Boolean);
+                    const vSp = v.sellingPrice !== '' && v.sellingPrice !== undefined ? Number(v.sellingPrice) : null;
+                    const vMrp = v.mrp !== '' && v.mrp !== undefined ? Number(v.mrp) : null;
+                    const isVarMismatch = vSp !== null && vMrp !== null && !isNaN(vSp) && !isNaN(vMrp) && vSp > 0 && vMrp > 0 && vSp > vMrp;
                     return (
                       <div className="pcc-variant-card" key={v._id}>
                         <div className="pcc-variant-card-head">
@@ -1290,13 +1532,33 @@ function ProductCreatePage({ token }) {
                             <input type="text" placeholder="e.g. 8901234567890" value={v.barcode}
                               onChange={(e) => handleVariantChange(v._id, 'barcode', e.target.value)} />
                           </Field>
-                          <Field label="Selling Price (Rs)">
-                            <input type="number" placeholder="0.00" value={v.sellingPrice}
-                              onChange={(e) => handleVariantChange(v._id, 'sellingPrice', e.target.value)} />
+                          <Field
+                            label="Selling Price (Rs)"
+                            error={isVarMismatch ? 'Selling price cannot exceed MRP.' : undefined}
+                            touched={isVarMismatch}
+                          >
+                            <input
+                              type="number"
+                              placeholder="0.00"
+                              min="0"
+                              step="0.01"
+                              value={v.sellingPrice}
+                              onChange={(e) => handleVariantChange(v._id, 'sellingPrice', e.target.value)}
+                            />
                           </Field>
-                          <Field label="MRP (Rs)">
-                            <input type="number" placeholder="0.00" value={v.mrp}
-                              onChange={(e) => handleVariantChange(v._id, 'mrp', e.target.value)} />
+                          <Field
+                            label="MRP (Rs)"
+                            error={isVarMismatch ? 'MRP cannot be less than Selling Price.' : undefined}
+                            touched={isVarMismatch}
+                          >
+                            <input
+                              type="number"
+                              placeholder="0.00"
+                              min="0"
+                              step="0.01"
+                              value={v.mrp}
+                              onChange={(e) => handleVariantChange(v._id, 'mrp', e.target.value)}
+                            />
                           </Field>
                           <Field label="Stock Quantity">
                             <input type="number" placeholder="0" value={v.stockQuantity}
@@ -1404,10 +1666,16 @@ function ProductCreatePage({ token }) {
             <>
               <div className="pcc-fgrid">
                 <Field label="Business Account" required error={errors.userId} touched={touched.userId} span2>
-                  <select {...inp('userId')}>
-                    <option value="">Select business account</option>
-                    {businesses.map((b) => <option key={b.id} value={b.id}>{getBusinessName(b)}</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.userId}
+                    onChange={(val) => handleChange('userId', val)}
+                    options={businessOptions}
+                    placeholder={isLoadingBusinesses ? 'Loading businesses...' : 'Select business account'}
+                    searchPlaceholder="Search business by name, mobile, ID..."
+                    hasError={Boolean(errors.userId && touched.userId)}
+                    isLoading={isLoadingBusinesses}
+                    loadingLabel="Loading businesses..."
+                  />
                 </Field>
               </div>
               <div className="pcc-company-summary">
@@ -1442,11 +1710,11 @@ function ProductCreatePage({ token }) {
               disabled={isSaving}
               onClick={() => {
                 setIsSaveMenuOpen(false);
-                setSubmitMode('draft');
-                handleSubmit(undefined, 'draft');
+                setSubmitMode('submit');
+                handleSubmit(undefined, 'submit');
               }}
             >
-              {isSaving && submitMode === 'draft' ? 'Saving...' : 'Save'}
+              {isSaving && submitMode === 'submit' ? 'Publishing...' : 'Save & Publish'}
             </button>
             <button
               type="button"
@@ -1468,17 +1736,17 @@ function ProductCreatePage({ token }) {
                   disabled={isSaving}
                   onClick={() => {
                     setIsSaveMenuOpen(false);
-                    setSubmitMode('submit');
-                    handleSubmit(undefined, 'submit');
+                    setSubmitMode('draft');
+                    handleSubmit(undefined, 'draft');
                   }}
                 >
-                  {isSaving && submitMode === 'submit' ? 'Submitting...' : 'Save & Submit'}
+                  {isSaving && submitMode === 'draft' ? 'Saving draft...' : 'Save as Draft'}
                 </button>
               </div>
             ) : null}
           </div>
           <button type="submit" className="primary-btn hidden-submit" disabled={isSaving}>
-            {isSaving ? 'Creating…' : 'Save'}
+            {isSaving ? (submitMode === 'draft' ? 'Saving draft…' : 'Publishing…') : 'Save & Publish'}
           </button>
         </div>
 

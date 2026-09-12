@@ -6,6 +6,8 @@
 // reimplementing them — this component only owns the JSX, not the state logic, which keeps the
 // migration low-risk.
 
+import SearchableSelect from './SearchableSelect';
+
 function ImageField({ field, item, idx, context }) {
   const warningKey = context.getWarningKey ? context.getWarningKey(idx, field.name) : null;
   const warning = warningKey ? context.phaseOneImageWarnings?.[warningKey] : null;
@@ -59,24 +61,6 @@ function DestinationPickerField({ idx, item, context }) {
       ? context.handleHeroCtaNavigationTargetTypeChange(idx, type)
       : context.handleHeroNavigationTargetTypeChange(idx, type);
 
-  const productQuery = context.heroDestinationQueries?.[idx] || '';
-  const filteredProducts = (context.approvedDestinationProducts || [])
-    .filter(
-      (product) =>
-        !productQuery.trim() ||
-        context.getDestinationProductSearchText(product).includes(context.normalizeSearchText(productQuery))
-    )
-    .slice(0, 80);
-
-  const businessQuery = context.businessDestinationQueries?.[idx] || '';
-  const filteredBusinesses = (Array.isArray(context.businessDirectory) ? context.businessDirectory : [])
-    .filter(
-      (business) =>
-        !businessQuery.trim() ||
-        context.getBusinessSelectionSearchText(business).includes(context.normalizeSearchText(businessQuery))
-    )
-    .slice(0, 80);
-
   const resolvedLinkLabel = usesCtaDestination ? 'Resolved CTA link' : 'Resolved link';
 
   return (
@@ -95,18 +79,13 @@ function DestinationPickerField({ idx, item, context }) {
       {navigationTarget.type === 'COLLECTION' ? (
         <label className="field field-span">
           <span>Collection</span>
-          <select value={navigationTarget.value} onChange={(event) => updateTarget('COLLECTION', event.target.value)}>
-            <option value="">Select collection</option>
-            {!(context.productCollectionOptions || []).some((option) => option.value === navigationTarget.value) &&
-            navigationTarget.value ? (
-              <option value={navigationTarget.value}>Current: {navigationTarget.value}</option>
-            ) : null}
-            {(context.productCollectionOptions || []).map((option) => (
-              <option key={`hero-collection-${option.value}`} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <SearchableSelect
+            value={navigationTarget.value}
+            onChange={(nextValue) => updateTarget('COLLECTION', nextValue)}
+            options={context.productCollectionOptions || []}
+            placeholder="Search collections..."
+            isLoading={context.isLoadingProductCollections}
+          />
           <p className="field-help">
             {context.isLoadingProductCollections
               ? 'Loading product collections...'
@@ -116,54 +95,36 @@ function DestinationPickerField({ idx, item, context }) {
       ) : null}
 
       {navigationTarget.type === 'PRODUCT' ? (
-        <>
-          <label className="field">
-            <span>Search products</span>
-            <input
-              type="search"
-              value={productQuery}
-              onChange={(event) => context.updateHeroDestinationQuery(idx, event.target.value)}
-              placeholder="Search by product name, id, brand, SKU"
-            />
-          </label>
-          <label className="field field-span">
-            <span>Product</span>
-            <select value={navigationTarget.value} onChange={(event) => updateTarget('PRODUCT', event.target.value)}>
-              <option value="">Select product</option>
-              {!filteredProducts.some((product) => String(product?.id || '') === navigationTarget.value) &&
-              navigationTarget.value ? (
-                <option value={navigationTarget.value}>Current product #{navigationTarget.value}</option>
-              ) : null}
-              {filteredProducts.map((product) => (
-                <option key={`hero-product-${product?.id}`} value={String(product?.id || '')}>
-                  {context.formatCleanDestinationProductLabel(product)}
-                </option>
-              ))}
-            </select>
-            <p className="field-help">
-              {context.isLoadingDestinationProducts
-                ? 'Loading approved products...'
-                : `${resolvedLinkLabel}: ${context.buildNavigationTargetLink('PRODUCT', navigationTarget.value) || '(empty)'}`}
-            </p>
-          </label>
-        </>
+        <label className="field field-span">
+          <span>Product</span>
+          <SearchableSelect
+            value={navigationTarget.value}
+            onChange={(nextValue) => updateTarget('PRODUCT', nextValue)}
+            options={(context.approvedDestinationProducts || []).map((product) => ({
+              value: String(product?.id || ''),
+              label: context.formatCleanDestinationProductLabel(product),
+              searchText: context.getDestinationProductSearchText(product),
+            }))}
+            placeholder="Search product by name, id, brand, SKU..."
+            isLoading={context.isLoadingDestinationProducts}
+          />
+          <p className="field-help">
+            {context.isLoadingDestinationProducts
+              ? 'Loading approved products...'
+              : `${resolvedLinkLabel}: ${context.buildNavigationTargetLink('PRODUCT', navigationTarget.value) || '(empty)'}`}
+          </p>
+        </label>
       ) : null}
 
       {navigationTarget.type === 'CATEGORY' || navigationTarget.type === 'MAIN_CATEGORY_PRODUCTS' ? (
         <label className="field field-span">
           <span>{navigationTarget.type === 'MAIN_CATEGORY_PRODUCTS' ? 'Main category products' : 'Category page'}</span>
-          <select value={navigationTarget.value} onChange={(event) => updateTarget(navigationTarget.type, event.target.value)}>
-            <option value="">Select main category</option>
-            {!(context.destinationMainCategoryOptions || []).some((option) => option.value === navigationTarget.value) &&
-            navigationTarget.value ? (
-              <option value={navigationTarget.value}>Current main category #{navigationTarget.value}</option>
-            ) : null}
-            {(context.destinationMainCategoryOptions || []).map((option) => (
-              <option key={`hero-category-${option.value}`} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <SearchableSelect
+            value={navigationTarget.value}
+            onChange={(nextValue) => updateTarget(navigationTarget.type, nextValue)}
+            options={context.destinationMainCategoryOptions || []}
+            placeholder="Search main categories..."
+          />
           <p className="field-help">
             {resolvedLinkLabel}: {context.buildNavigationTargetLink(navigationTarget.type, navigationTarget.value) || '(empty)'}
           </p>
@@ -186,45 +147,25 @@ function DestinationPickerField({ idx, item, context }) {
       ) : null}
 
       {navigationTarget.type === 'BUSINESS_PRODUCTS' ? (
-        <>
-          <label className="field">
-            <span>Search business</span>
-            <input
-              type="search"
-              value={businessQuery}
-              onChange={(event) => context.updateBusinessDestinationQuery(idx, event.target.value)}
-              onFocus={() => context.loadBusinessDirectory()}
-              placeholder="Search business name, mobile, city"
-            />
-          </label>
-          <label className="field field-span">
-            <span>Business</span>
-            <select
-              value={navigationTarget.value}
-              onFocus={() => context.loadBusinessDirectory()}
-              onChange={(event) => context.updateItemBusinessProductsTarget(idx, event.target.value, usesCtaDestination)}
-            >
-              <option value="">{context.isLoadingBusinessDirectory ? 'Loading businesses...' : 'Select business'}</option>
-              {!filteredBusinesses.some((business) => context.resolveBusinessDirectoryId(business) === navigationTarget.value) &&
-              navigationTarget.value ? (
-                <option value={navigationTarget.value}>Current business #{navigationTarget.value}</option>
-              ) : null}
-              {filteredBusinesses.map((business) => {
-                const businessId = context.resolveBusinessDirectoryId(business);
-                if (!businessId) return null;
-                return (
-                  <option key={`business-products-${businessId}`} value={businessId}>
-                    {context.formatBusinessDestinationLabel(business)}
-                  </option>
-                );
-              })}
-            </select>
-            <p className="field-help">
-              {resolvedLinkLabel}:{' '}
-              {item.deepLink || context.buildNavigationTargetLink('BUSINESS_PRODUCTS', navigationTarget.value) || '(empty)'}
-            </p>
-          </label>
-        </>
+        <label className="field field-span">
+          <span>Business</span>
+          <SearchableSelect
+            value={navigationTarget.value}
+            onChange={(businessId) => context.updateItemBusinessProductsTarget(idx, businessId, usesCtaDestination)}
+            options={(Array.isArray(context.businessDirectory) ? context.businessDirectory : []).map((business) => ({
+              value: context.resolveBusinessDirectoryId(business),
+              label: context.formatBusinessDestinationLabel(business),
+              searchText: context.getBusinessSelectionSearchText(business),
+            }))}
+            placeholder="Search business by name, mobile, city..."
+            isLoading={context.isLoadingBusinessDirectory}
+            onOpen={context.loadBusinessDirectory}
+          />
+          <p className="field-help">
+            {resolvedLinkLabel}:{' '}
+            {item.deepLink || context.buildNavigationTargetLink('BUSINESS_PRODUCTS', navigationTarget.value) || '(empty)'}
+          </p>
+        </label>
       ) : null}
 
       {navigationTarget.type === 'CAMPAIGN' || navigationTarget.type === 'EXTERNAL_URL' || navigationTarget.type === 'CUSTOM' ? (
