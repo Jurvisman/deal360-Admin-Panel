@@ -17,6 +17,7 @@ import { SCREEN_BLOCK_SCHEMAS, TARGETING_FIELDS } from './appConfig/screenBlockS
 import { ITEM_LIST_BLOCK_SCHEMAS } from './appConfig/itemListBlockSchemas';
 import { SchemaFieldsRenderer } from './appConfig/SchemaFieldsRenderer';
 import { ItemListFieldEditor } from './appConfig/ItemListFieldEditor';
+import SearchableSelect from './appConfig/SearchableSelect';
 import './appConfig/appConfigStudio.css';
 import { StudioTopBar } from './appConfig/StudioTopBar';
 import { StudioToolbox } from './appConfig/StudioToolbox';
@@ -399,8 +400,6 @@ const getNavigationTargetPlaceholder = (targetType) =>
   NAVIGATION_TARGET_PLACEHOLDERS[String(targetType || DEFAULT_NAVIGATION_TARGET).trim().toUpperCase()] ||
   NAVIGATION_TARGET_PLACEHOLDERS[DEFAULT_NAVIGATION_TARGET];
 
-const normalizeSearchText = (value) => String(value || '').trim().toLowerCase();
-
 const getProductIndustryId = (product) =>
   normalizeCollectionId(
     product?.industryId ||
@@ -570,11 +569,6 @@ function AppConfigPage({ token }) {
   const [isLoadingDestinationProducts, setIsLoadingDestinationProducts] = useState(false);
   const [businessDirectory, setBusinessDirectory] = useState([]);
   const [isLoadingBusinessDirectory, setIsLoadingBusinessDirectory] = useState(false);
-  const [placeCardBusinessQuery, setPlaceCardBusinessQuery] = useState('');
-  const [placeCardBusinessPick, setPlaceCardBusinessPick] = useState('');
-  const [heroDestinationQueries, setHeroDestinationQueries] = useState({});
-  const [businessDestinationQueries, setBusinessDestinationQueries] = useState({});
-  const [sectionDestinationQuery, setSectionDestinationQuery] = useState('');
   const [bentoTileProductQueries, setBentoTileProductQueries] = useState({});
   const [mainCategories, setMainCategories] = useState([]);
   const [sourceCategories, setSourceCategories] = useState([]);
@@ -2044,14 +2038,6 @@ function AppConfigPage({ token }) {
     }
   };
 
-  const updateHeroDestinationQuery = (index, value) => {
-    setHeroDestinationQueries((prev) => ({ ...prev, [index]: value }));
-  };
-
-  const updateBusinessDestinationQuery = (index, value) => {
-    setBusinessDestinationQueries((prev) => ({ ...prev, [index]: value }));
-  };
-
   const addSelectedPlaceBusiness = async (userId) => {
     const normalizedUserId = normalizeCollectionId(userId);
     if (!normalizedUserId) return;
@@ -2077,8 +2063,6 @@ function AppConfigPage({ token }) {
         };
       });
       setMessage({ type: 'success', text: `Added ${nextItem.title || 'business'} to place cards.` });
-      setPlaceCardBusinessQuery('');
-      setPlaceCardBusinessPick('');
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Failed to load business details.' });
     }
@@ -4122,18 +4106,19 @@ function AppConfigPage({ token }) {
     [sectionForm.sourceBusinessUserIds]
   );
 
-  const filteredPlaceBusinessOptions = useMemo(() => {
-    const query = normalizeSearchText(placeCardBusinessQuery);
+  const placeCardBusinessOptions = useMemo(() => {
     const selectedSet = new Set(selectedPlaceBusinessIds);
     return (Array.isArray(businessDirectory) ? businessDirectory : [])
       .filter((business) => {
         const businessId = normalizeCollectionId(business?.id || business?.userId);
-        if (!businessId || selectedSet.has(businessId)) return false;
-        if (!query) return true;
-        return getBusinessSelectionSearchText(business).includes(query);
+        return Boolean(businessId) && !selectedSet.has(businessId);
       })
-      .slice(0, 80);
-  }, [businessDirectory, placeCardBusinessQuery, selectedPlaceBusinessIds]);
+      .map((business) => ({
+        value: normalizeCollectionId(business?.id || business?.userId),
+        label: formatBusinessSelectionLabel(business),
+        searchText: getBusinessSelectionSearchText(business),
+      }));
+  }, [businessDirectory, selectedPlaceBusinessIds]);
 
   const filteredBentoMainCategoryOptions = useMemo(() => {
     const industryId = normalizeCollectionId(sectionForm.bentoTilesIndustryId);
@@ -4219,14 +4204,6 @@ function AppConfigPage({ token }) {
         ),
     [destinationProducts]
   );
-
-  const filteredSectionProductOptions = useMemo(() => {
-    const query = normalizeSearchText(sectionDestinationQuery);
-    if (!query) return approvedDestinationProducts;
-    return approvedDestinationProducts.filter((product) =>
-      getDestinationProductSearchText(product).includes(query)
-    );
-  }, [approvedDestinationProducts, sectionDestinationQuery]);
 
   const headerAttachedEntries = useMemo(
     () =>
@@ -5046,25 +5023,15 @@ function AppConfigPage({ token }) {
                           </select>
                         </label>
                         {sectionNavigationTarget.type === 'COLLECTION' ? (
-                        <label className="field field-span">
+                          <label className="field field-span">
                             <span>Collection</span>
-                            <select
+                            <SearchableSelect
                               value={sectionNavigationTarget.value}
-                              onChange={(event) => updateSectionNavigationTarget('COLLECTION', event.target.value)}
-                            >
-                              <option value="">Select collection</option>
-                              {!productCollectionOptions.some((option) => option.value === sectionNavigationTarget.value) &&
-                              sectionNavigationTarget.value ? (
-                                <option value={sectionNavigationTarget.value}>
-                                  Current: {sectionNavigationTarget.value}
-                                </option>
-                              ) : null}
-                              {productCollectionOptions.map((option) => (
-                                <option key={`section-collection-${option.value}`} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
+                              onChange={(nextValue) => updateSectionNavigationTarget('COLLECTION', nextValue)}
+                              options={productCollectionOptions}
+                              placeholder="Search collections..."
+                              isLoading={isLoadingProductCollections}
+                            />
                             <p className="field-help">
                               {isLoadingProductCollections
                                 ? 'Loading product collections...'
@@ -5075,45 +5042,29 @@ function AppConfigPage({ token }) {
                           </label>
                         ) : null}
                         {sectionNavigationTarget.type === 'PRODUCT' ? (
-                          <>
-                            <label className="field">
-                              <span>Search products</span>
-                              <input
-                                type="search"
-                                value={sectionDestinationQuery}
-                                onChange={(event) => setSectionDestinationQuery(event.target.value)}
-                                placeholder="Search by product name, id, brand, SKU"
-                              />
-                            </label>
-                            <label className="field field-span">
-                              <span>Product</span>
-                              <select
-                                value={sectionNavigationTarget.value}
-                                onChange={(event) => updateSectionNavigationTarget('PRODUCT', event.target.value)}
-                              >
-                                <option value="">Select product</option>
-                                {!filteredSectionProductOptions.some(
-                                  (product) => String(product?.id || '') === sectionNavigationTarget.value
-                                ) && sectionNavigationTarget.value ? (
-                                  <option value={sectionNavigationTarget.value}>
-                                    Current product #{sectionNavigationTarget.value}
-                                  </option>
-                                ) : null}
-                                {filteredSectionProductOptions.map((product) => (
-                                  <option key={`section-product-${product?.id}`} value={String(product?.id || '')}>
-                                    {formatCleanDestinationProductLabel(product)}
-                                  </option>
-                                ))}
-                              </select>
-                              <p className="field-help">
-                                {isLoadingDestinationProducts
-                                  ? 'Loading approved products...'
-                                  : `Resolved link: ${
-                                      buildNavigationTargetLink('PRODUCT', sectionNavigationTarget.value) || '(empty)'
-                                    }`}
-                              </p>
-                            </label>
-                          </>
+                          <label className="field field-span">
+                            <span>Product</span>
+                            <SearchableSelect
+                              value={sectionNavigationTarget.value}
+                              onChange={(nextValue) => updateSectionNavigationTarget('PRODUCT', nextValue)}
+                              options={(Array.isArray(approvedDestinationProducts) ? approvedDestinationProducts : []).map(
+                                (product) => ({
+                                  value: String(product?.id || ''),
+                                  label: formatCleanDestinationProductLabel(product),
+                                  searchText: getDestinationProductSearchText(product),
+                                })
+                              )}
+                              placeholder="Search product by name, id, brand, SKU..."
+                              isLoading={isLoadingDestinationProducts}
+                            />
+                            <p className="field-help">
+                              {isLoadingDestinationProducts
+                                ? 'Loading approved products...'
+                                : `Resolved link: ${
+                                    buildNavigationTargetLink('PRODUCT', sectionNavigationTarget.value) || '(empty)'
+                                  }`}
+                            </p>
+                          </label>
                         ) : null}
                         {(sectionNavigationTarget.type === 'CATEGORY' ||
                           sectionNavigationTarget.type === 'MAIN_CATEGORY_PRODUCTS') ? (
@@ -5123,26 +5074,14 @@ function AppConfigPage({ token }) {
                                 ? 'Main category products'
                                 : 'Category page'}
                             </span>
-                            <select
+                            <SearchableSelect
                               value={sectionNavigationTarget.value}
-                              onChange={(event) =>
-                                updateSectionNavigationTarget(sectionNavigationTarget.type, event.target.value)
+                              onChange={(nextValue) =>
+                                updateSectionNavigationTarget(sectionNavigationTarget.type, nextValue)
                               }
-                            >
-                              <option value="">Select main category</option>
-                              {!destinationMainCategoryOptions.some(
-                                (option) => option.value === sectionNavigationTarget.value
-                              ) && sectionNavigationTarget.value ? (
-                                <option value={sectionNavigationTarget.value}>
-                                  Current main category #{sectionNavigationTarget.value}
-                                </option>
-                              ) : null}
-                              {destinationMainCategoryOptions.map((option) => (
-                                <option key={`section-category-${option.value}`} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
+                              options={destinationMainCategoryOptions}
+                              placeholder="Search main categories..."
+                            />
                             <p className="field-help">
                               Resolved link:{' '}
                               {buildNavigationTargetLink(sectionNavigationTarget.type, sectionNavigationTarget.value) || '(empty)'}
@@ -6873,42 +6812,16 @@ function AppConfigPage({ token }) {
                                 </label>
                                 {String(sectionForm.sourceType || 'MANUAL').toUpperCase() === 'BUSINESS_SELECTION' ? (
                                   <>
-                                    <label className="field">
-                                      <span>Search businesses</span>
-                                      <input
-                                        type="search"
-                                        value={placeCardBusinessQuery}
-                                        onChange={(event) => setPlaceCardBusinessQuery(event.target.value)}
-                                        placeholder="Search by business name, id, type, city"
-                                      />
-                                    </label>
-                                    <label className="field">
+                                    <label className="field field-span">
                                       <span>Add business</span>
-                                      <select
-                                        value={placeCardBusinessPick}
-                                        onChange={(event) => {
-                                          const nextValue = event.target.value;
-                                          setPlaceCardBusinessPick(nextValue);
-                                          if (nextValue) {
-                                            addSelectedPlaceBusiness(nextValue);
-                                          }
-                                        }}
-                                      >
-                                        <option value="">
-                                          {isLoadingBusinessDirectory ? 'Loading businesses...' : 'Select business'}
-                                        </option>
-                                        {filteredPlaceBusinessOptions.map((business) => {
-                                          const businessId = normalizeCollectionId(
-                                            business?.id || business?.userId
-                                          );
-                                          if (!businessId) return null;
-                                          return (
-                                            <option key={`place-card-business-${businessId}`} value={businessId}>
-                                              {formatBusinessSelectionLabel(business)}
-                                            </option>
-                                          );
-                                        })}
-                                      </select>
+                                      <SearchableSelect
+                                        value=""
+                                        onChange={(businessId) => addSelectedPlaceBusiness(businessId)}
+                                        options={placeCardBusinessOptions}
+                                        placeholder="Search business by name, id, type, city..."
+                                        isLoading={isLoadingBusinessDirectory}
+                                        onOpen={loadBusinessDirectory}
+                                      />
                                     </label>
                                     <div className="field field-span">
                                       <p className="field-help">
@@ -6971,15 +6884,10 @@ function AppConfigPage({ token }) {
                           destinationMainCategoryOptions,
                           approvedDestinationProducts,
                           isLoadingDestinationProducts,
-                          heroDestinationQueries,
-                          updateHeroDestinationQuery,
-                          normalizeSearchText,
                           getDestinationProductSearchText,
                           formatCleanDestinationProductLabel,
                           businessDirectory,
                           isLoadingBusinessDirectory,
-                          businessDestinationQueries,
-                          updateBusinessDestinationQuery,
                           loadBusinessDirectory,
                           getBusinessSelectionSearchText,
                           resolveBusinessDirectoryId,
@@ -7060,28 +6968,6 @@ function AppConfigPage({ token }) {
                               item.destinationType,
                               item.destinationValue
                             );
-                            const heroDestinationQuery = heroDestinationQueries[idx] || '';
-                            const filteredHeroProductOptions = showHeroDestinationPicker
-                              ? approvedDestinationProducts
-                                  .filter((product) => {
-                                    if (!heroDestinationQuery.trim()) return true;
-                                    return getDestinationProductSearchText(product).includes(
-                                      normalizeSearchText(heroDestinationQuery)
-                                    );
-                                  })
-                                  .slice(0, 80)
-                              : [];
-                            const businessDestinationQuery = businessDestinationQueries[idx] || '';
-                            const filteredBusinessDestinationOptions = showHeroDestinationPicker
-                              ? (Array.isArray(businessDirectory) ? businessDirectory : [])
-                                  .filter((business) => {
-                                    if (!businessDestinationQuery.trim()) return true;
-                                    return getBusinessSelectionSearchText(business).includes(
-                                      normalizeSearchText(businessDestinationQuery)
-                                    );
-                                  })
-                                  .slice(0, 80)
-                              : [];
                             const itemKind = item?.kind || 'tile';
                             const isBrandHeroItem = isPhaseOneBrandGrid && itemKind === 'hero';
                             const isBrandCtaItem = isPhaseOneBrandGrid && itemKind === 'cta';
@@ -7688,28 +7574,17 @@ function AppConfigPage({ token }) {
                                     {navigationTarget.type === 'COLLECTION' ? (
                                       <label className="field field-span">
                                         <span>Collection</span>
-                                        <select
+                                        <SearchableSelect
                                           value={navigationTarget.value}
-                                          onChange={(event) =>
+                                          onChange={(nextValue) =>
                                             usesCtaDestination
-                                              ? updateItemCtaNavigationTarget(idx, 'COLLECTION', event.target.value)
-                                              : updateItemNavigationTarget(idx, 'COLLECTION', event.target.value)
+                                              ? updateItemCtaNavigationTarget(idx, 'COLLECTION', nextValue)
+                                              : updateItemNavigationTarget(idx, 'COLLECTION', nextValue)
                                           }
-                                        >
-                                          <option value="">Select collection</option>
-                                          {!productCollectionOptions.some(
-                                            (option) => option.value === navigationTarget.value
-                                          ) && navigationTarget.value ? (
-                                            <option value={navigationTarget.value}>
-                                              Current: {navigationTarget.value}
-                                            </option>
-                                          ) : null}
-                                          {productCollectionOptions.map((option) => (
-                                            <option key={`hero-collection-${option.value}`} value={option.value}>
-                                              {option.label}
-                                            </option>
-                                          ))}
-                                        </select>
+                                          options={productCollectionOptions}
+                                          placeholder="Search collections..."
+                                          isLoading={isLoadingProductCollections}
+                                        />
                                         <p className="field-help">
                                           {isLoadingProductCollections
                                             ? 'Loading product collections...'
@@ -7720,54 +7595,33 @@ function AppConfigPage({ token }) {
                                       </label>
                                     ) : null}
                                     {navigationTarget.type === 'PRODUCT' ? (
-                                      <>
-                                        <label className="field">
-                                          <span>Search products</span>
-                                  <input
-                                            type="search"
-                                            value={heroDestinationQuery}
-                                            onChange={(event) =>
-                                              updateHeroDestinationQuery(idx, event.target.value)
-                                            }
-                                            placeholder="Search by product name, id, brand, SKU"
-                                  />
-                                </label>
-                                        <label className="field field-span">
-                                          <span>Product</span>
-                                        <select
+                                      <label className="field field-span">
+                                        <span>Product</span>
+                                        <SearchableSelect
                                           value={navigationTarget.value}
-                                          onChange={(event) =>
+                                          onChange={(nextValue) =>
                                             usesCtaDestination
-                                              ? updateItemCtaNavigationTarget(idx, 'PRODUCT', event.target.value)
-                                              : updateItemNavigationTarget(idx, 'PRODUCT', event.target.value)
+                                              ? updateItemCtaNavigationTarget(idx, 'PRODUCT', nextValue)
+                                              : updateItemNavigationTarget(idx, 'PRODUCT', nextValue)
                                           }
-                                        >
-                                            <option value="">Select product</option>
-                                            {!filteredHeroProductOptions.some(
-                                              (product) => String(product?.id || '') === navigationTarget.value
-                                            ) && navigationTarget.value ? (
-                                              <option value={navigationTarget.value}>
-                                                Current product #{navigationTarget.value}
-                                              </option>
-                              ) : null}
-                                            {filteredHeroProductOptions.map((product) => (
-                                              <option
-                                                key={`hero-product-${product?.id}`}
-                                                value={String(product?.id || '')}
-                                              >
-                                                {formatCleanDestinationProductLabel(product)}
-                                              </option>
-                                            ))}
-                                          </select>
-                                          <p className="field-help">
-                                            {isLoadingDestinationProducts
-                                              ? 'Loading approved products...'
-                                              : `${usesCtaDestination ? 'Resolved CTA link' : 'Resolved link'}: ${
-                                                  buildNavigationTargetLink('PRODUCT', navigationTarget.value) || '(empty)'
-                                                }`}
-                                          </p>
-                                        </label>
-                                      </>
+                                          options={(Array.isArray(approvedDestinationProducts) ? approvedDestinationProducts : []).map(
+                                            (product) => ({
+                                              value: String(product?.id || ''),
+                                              label: formatCleanDestinationProductLabel(product),
+                                              searchText: getDestinationProductSearchText(product),
+                                            })
+                                          )}
+                                          placeholder="Search product by name, id, brand, SKU..."
+                                          isLoading={isLoadingDestinationProducts}
+                                        />
+                                        <p className="field-help">
+                                          {isLoadingDestinationProducts
+                                            ? 'Loading approved products...'
+                                            : `${usesCtaDestination ? 'Resolved CTA link' : 'Resolved link'}: ${
+                                                buildNavigationTargetLink('PRODUCT', navigationTarget.value) || '(empty)'
+                                              }`}
+                                        </p>
+                                      </label>
                                     ) : null}
                                     {(navigationTarget.type === 'CATEGORY' ||
                                       navigationTarget.type === 'MAIN_CATEGORY_PRODUCTS') ? (
@@ -7833,56 +7687,29 @@ function AppConfigPage({ token }) {
                                       </label>
                                     ) : null}
                                     {navigationTarget.type === 'BUSINESS_PRODUCTS' ? (
-                                      <>
-                                        <label className="field">
-                                          <span>Search business</span>
-                                          <input
-                                            type="search"
-                                            value={businessDestinationQuery}
-                                            onChange={(event) => updateBusinessDestinationQuery(idx, event.target.value)}
-                                            onFocus={() => loadBusinessDirectory()}
-                                            placeholder="Search business name, mobile, city"
-                                          />
-                                        </label>
-                                        <label className="field field-span">
-                                          <span>Business</span>
-                                          <select
-                                            value={navigationTarget.value}
-                                            onFocus={() => loadBusinessDirectory()}
-                                            onChange={(event) =>
-                                              updateItemBusinessProductsTarget(
-                                                idx,
-                                                event.target.value,
-                                                usesCtaDestination
-                                              )
-                                            }
-                                          >
-                                            <option value="">
-                                              {isLoadingBusinessDirectory ? 'Loading businesses...' : 'Select business'}
-                                            </option>
-                                            {!filteredBusinessDestinationOptions.some(
-                                              (business) => resolveBusinessDirectoryId(business) === navigationTarget.value
-                                            ) && navigationTarget.value ? (
-                                              <option value={navigationTarget.value}>
-                                                Current business #{navigationTarget.value}
-                                              </option>
-                                            ) : null}
-                                            {filteredBusinessDestinationOptions.map((business) => {
-                                              const businessId = resolveBusinessDirectoryId(business);
-                                              if (!businessId) return null;
-                                              return (
-                                                <option key={`business-products-${businessId}`} value={businessId}>
-                                                  {formatBusinessDestinationLabel(business)}
-                                                </option>
-                                              );
-                                            })}
-                                          </select>
-                                          <p className="field-help">
-                                            {usesCtaDestination ? 'Resolved CTA link' : 'Resolved link'}:{' '}
-                                            {item.deepLink || buildNavigationTargetLink('BUSINESS_PRODUCTS', navigationTarget.value) || '(empty)'}
-                                          </p>
-                                        </label>
-                                      </>
+                                      <label className="field field-span">
+                                        <span>Business</span>
+                                        <SearchableSelect
+                                          value={navigationTarget.value}
+                                          onChange={(businessId) =>
+                                            updateItemBusinessProductsTarget(idx, businessId, usesCtaDestination)
+                                          }
+                                          options={(Array.isArray(businessDirectory) ? businessDirectory : []).map(
+                                            (business) => ({
+                                              value: resolveBusinessDirectoryId(business),
+                                              label: formatBusinessDestinationLabel(business),
+                                              searchText: getBusinessSelectionSearchText(business),
+                                            })
+                                          )}
+                                          placeholder="Search business by name, mobile, city..."
+                                          isLoading={isLoadingBusinessDirectory}
+                                          onOpen={loadBusinessDirectory}
+                                        />
+                                        <p className="field-help">
+                                          {usesCtaDestination ? 'Resolved CTA link' : 'Resolved link'}:{' '}
+                                          {item.deepLink || buildNavigationTargetLink('BUSINESS_PRODUCTS', navigationTarget.value) || '(empty)'}
+                                        </p>
+                                      </label>
                                     ) : null}
                                     {(navigationTarget.type === 'CAMPAIGN' ||
                                       navigationTarget.type === 'EXTERNAL_URL' ||

@@ -2206,6 +2206,109 @@ textarea {
   display: block;
 }
 
+.cms-combobox,
+.business-combobox {
+  position: relative;
+}
+
+.cms-combobox-control,
+.business-combobox-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #f7f5ff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cms-combobox-control:focus-within,
+.business-combobox-control:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 69, 237, 0.12);
+}
+
+.cms-combobox-chip,
+.business-combobox-chip {
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(99, 69, 237, 0.12);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cms-combobox-input,
+.business-combobox-input {
+  flex: 1;
+  min-width: 120px;
+  border: none !important;
+  background: transparent !important;
+  padding: 4px 2px !important;
+  box-shadow: none !important;
+}
+
+.cms-combobox-input:focus,
+.business-combobox-input:focus {
+  outline: none;
+}
+
+.cms-combobox-panel,
+.business-combobox-panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 36px rgba(15, 18, 48, 0.16);
+  padding: 6px;
+}
+
+.cms-combobox-option,
+.business-combobox-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.cms-combobox-option:hover,
+.business-combobox-option:hover {
+  background: rgba(99, 69, 237, 0.08);
+}
+
+.cms-combobox-option.is-selected,
+.business-combobox-option.is-selected {
+  background: rgba(99, 69, 237, 0.14);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.cms-combobox-empty,
+.business-combobox-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
 .inline-row {
   display: flex;
   align-items: center;
