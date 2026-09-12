@@ -1,135 +1,107 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip as RechartsTooltip,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  AreaChart,
+  Area,
+} from 'recharts';
 import { Banner } from '../components';
-import { fetchUsers, listSubscriptionAssignments, listSubscriptionPlans } from '../services/adminApi';
+import { getDashboardOverview } from '../services/adminApi';
 
-const emptyStats = {
-  total: 0,
-  business: 0,
-  users: 0,
-  logistics: 0,
-  insurance: 0,
-  other: 0,
+const CACHE_KEY = 'traddex_dashboard_overview_cache';
+
+const defaultOverview = {
+  accounts: { totalAccounts: 0, businessProfiles: 0, individualUsers: 0, activeAccounts: 0 },
+  products: { totalProducts: 0, liveOnApp: 0, pendingReview: 0, drafts: 0, websiteLive: 0 },
+  leads: { totalGenerated: 0, totalCirculated: 0, contactsUnlocked: 0, quotationsSent: 0, dealsClosed: 0, conversionRate: 0 },
+  revenue: { totalRevenue: 0, thisMonthRevenue: 0, totalPaidCount: 0, activeSubscriptions: 0, paidSubscribers: 0, topPlans: [], monthlyTrend: [] },
 };
 
-const getPlanId = (plan) => plan?.id ?? plan?.plan_id;
-const getAssignmentPlanId = (assignment) => assignment?.plan_id ?? assignment?.planId ?? assignment?.plan?.id;
-const getPlanLabel = (plan) => plan?.plan_name || plan?.name || 'Plan';
-
-const toNumber = (value) => {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
+const getCachedOverview = () => {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return defaultOverview;
 };
 
-const formatCurrency = (value) =>
+const toNumber = (val) => {
+  const n = Number(val);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatCurrency = (val) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(
-    toNumber(value)
+    toNumber(val)
   );
 
-const toRgba = (hex, alpha) => {
-  if (!hex || typeof hex !== 'string') return `rgba(37, 99, 235, ${alpha})`;
-  let value = hex.replace('#', '').trim();
-  if (value.length === 3) {
-    value = value
-      .split('')
-      .map((char) => char + char)
-      .join('');
-  }
-  const parsed = Number.parseInt(value, 16);
-  if (Number.isNaN(parsed)) return `rgba(37, 99, 235, ${alpha})`;
-  const r = (parsed >> 16) & 255;
-  const g = (parsed >> 8) & 255;
-  const b = parsed & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-};
-
-const statTone = (accent) => ({
-  '--stat-accent': accent,
-  '--stat-accent-soft': toRgba(accent, 0.16),
-  '--stat-accent-border': toRgba(accent, 0.45),
-  '--stat-accent-glow': toRgba(accent, 0.28),
-});
-
-const buildTrend = (seed, base, points = 12) => {
-  if (base <= 0) {
-    return Array.from({ length: points }, () => 0);
-  }
-  const series = [];
-  const wobble = base * 0.18;
-  for (let i = 0; i < points; i += 1) {
-    const ratio = points === 1 ? 0 : i / (points - 1);
-    const wave = Math.sin(ratio * Math.PI * 2 + seed) * wobble;
-    const drift = ratio * wobble * 0.6;
-    const jitter = Math.cos(seed * 0.7 + i) * wobble * 0.15;
-    series.push(Math.max(0, base * 0.6 + wave + drift + jitter));
-  }
-  return series;
-};
-
-const buildSparkCoords = (values, width, height, padding) => {
-  const max = Math.max(...values, 1);
-  const usableWidth = width - padding * 2;
-  const usableHeight = height - padding * 2;
-  return values.map((value, index) => {
-    const ratio = values.length === 1 ? 0 : index / (values.length - 1);
-    const x = padding + ratio * usableWidth;
-    const y = height - padding - (value / max) * usableHeight;
-    return { x, y };
-  });
-};
-
-const coordsToPoints = (coords) => coords.map((point) => `${point.x},${point.y}`).join(' ');
-
-const coordsToArea = (coords, height, padding) => {
-  if (!coords.length) return '';
-  const start = `${coords[0].x},${height - padding}`;
-  const line = coords.map((point) => `${point.x},${point.y}`).join(' L ');
-  const end = `${coords[coords.length - 1].x},${height - padding}`;
-  return `M ${start} L ${line} L ${end} Z`;
+/* ── Minimal Custom Tooltip for Recharts ────────────────────────── */
+const MinimalTooltip = ({ active, payload, label, formatter, prefix = '' }) => {
+  if (!active || !payload?.length) return null;
+  const item = payload[0];
+  const displayVal = formatter ? formatter(item.value) : item.value;
+  return (
+    <div
+      style={{
+        background: 'var(--panel, #ffffff)',
+        border: '1px solid var(--line, #e2e8f0)',
+        borderRadius: '8px',
+        padding: '8px 12px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+        fontSize: '12px',
+        color: 'var(--text, #0f172a)',
+      }}
+    >
+      {label && <div style={{ fontWeight: 600, marginBottom: '2px', color: 'var(--muted, #64748b)' }}>{label}</div>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: item.color || item.payload?.fill || '#6366F1' }} />
+        <span style={{ color: 'var(--muted, #64748b)' }}>{item.name}:</span>
+        <strong style={{ fontWeight: 700 }}>{prefix}{displayVal}</strong>
+      </div>
+      {item.payload?.sub && (
+        <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)', marginTop: '2px' }}>{item.payload.sub}</div>
+      )}
+    </div>
+  );
 };
 
 function AdminDashboardPage({ token }) {
-  const [stats, setStats] = useState(emptyStats);
-  const [plans, setPlans] = useState([]);
-  const [assignments, setAssignments] = useState([]);
+  const navigate = useNavigate();
+  const [overview, setOverview] = useState(getCachedOverview);
   const [message, setMessage] = useState({ type: 'info', text: '' });
   const [isLoading, setIsLoading] = useState(false);
+  const [lastSynced, setLastSynced] = useState(() => {
+    return new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  });
   const loadingRef = useRef(false);
 
   const loadStats = async (silent = false) => {
     if (loadingRef.current) return;
     loadingRef.current = true;
-    if (!silent) {
-      setIsLoading(true);
-      setMessage({ type: 'info', text: '' });
-    }
+    if (!silent) setIsLoading(true);
+
     try {
-      const [usersResponse, plansResponse, assignmentsResponse] = await Promise.all([
-        fetchUsers(token),
-        listSubscriptionPlans(token),
-        listSubscriptionAssignments(token),
-      ]);
-      const users = usersResponse?.data || [];
-      const businessCount = users.filter((user) => user.userType === 'BUSINESS' || user.user_type === 'BUSINESS').length;
-      const userCount = users.filter((user) => user.userType === 'USER' || user.user_type === 'USER').length;
-      const logisticsCount = users.filter(
-        (user) => user.userType === 'LOGISTIC' || user.userType === 'LOGISTICS' || user.user_type === 'LOGISTIC'
-      ).length;
-      const insuranceCount = users.filter((user) => user.userType === 'INSURANCE' || user.user_type === 'INSURANCE')
-        .length;
-      const knownCount = businessCount + userCount + logisticsCount + insuranceCount;
-      const otherCount = Math.max(users.length - knownCount, 0);
-      setStats({
-        total: users.length,
-        business: businessCount,
-        users: userCount,
-        logistics: logisticsCount,
-        insurance: insuranceCount,
-        other: otherCount,
-      });
-      setPlans(plansResponse?.data?.plans || plansResponse?.data || []);
-      setAssignments(assignmentsResponse?.data?.subscriptions || assignmentsResponse?.data || []);
-    } catch (error) {
-      setMessage({ type: 'error', text: error.message || 'Failed to load dashboard stats.' });
+      const res = await getDashboardOverview(token);
+      if (res?.data) {
+        setOverview(res.data);
+        try {
+          sessionStorage.setItem(CACHE_KEY, JSON.stringify(res.data));
+        } catch (e) {}
+        setLastSynced(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      }
+    } catch (err) {
+      if (!silent) {
+        setMessage({ type: 'error', text: err.message || 'Failed to sync latest dashboard data.' });
+      }
     } finally {
       loadingRef.current = false;
       setIsLoading(false);
@@ -137,295 +109,798 @@ function AdminDashboardPage({ token }) {
   };
 
   useEffect(() => {
-    loadStats();
+    loadStats(true);
     const interval = setInterval(() => loadStats(true), 30000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [token]);
 
-  const planSummaries = useMemo(() => {
-    if (!plans.length) return [];
-    const planMap = new Map();
-    plans.forEach((plan) => {
-      const planId = getPlanId(plan);
-      if (planId == null) return;
-      planMap.set(String(planId), {
-        ...plan,
-        planId,
-        price: toNumber(plan?.price ?? plan?.plan_price ?? plan?.amount),
-      });
-    });
+  // Derived calculations
+  const totalProducts = Math.max(overview.products.totalProducts, 1);
+  const liveProductPct = overview.products.totalProducts > 0
+    ? Math.round((overview.products.liveOnApp / overview.products.totalProducts) * 100)
+    : 0;
 
-    const counts = new Map();
-    assignments.forEach((assignment) => {
-      const planId = getAssignmentPlanId(assignment);
-      if (planId == null) return;
-      const key = String(planId);
-      counts.set(key, (counts.get(key) || 0) + 1);
-    });
+  // Chart 1: Product Catalog Distribution (Pie / Donut)
+  const productChartData = useMemo(() => [
+    { name: 'Live on App', value: overview.products.liveOnApp || 0, color: '#10B981', sub: 'Approved & visible on mobile app' },
+    { name: 'Pending Review', value: overview.products.pendingReview || 0, color: '#F59E0B', sub: 'Awaiting admin moderation' },
+    { name: 'Drafts', value: overview.products.drafts || 0, color: '#94A3B8', sub: 'Unpublished drafts' },
+    { name: 'Website Live', value: overview.products.websiteLive || 0, color: '#8B5CF6', sub: 'Active on website storefront' },
+  ], [overview.products]);
 
-    return Array.from(planMap.values()).map((plan) => ({
-      ...plan,
-      assignedCount: counts.get(String(plan.planId)) || 0,
-      revenue: (counts.get(String(plan.planId)) || 0) * plan.price,
-    }));
-  }, [plans, assignments]);
+  // Chart 2: Lead Funnel Conversion (Horizontal Bar Chart)
+  const leadFunnelData = useMemo(() => [
+    { stage: '1. Inquiries', count: overview.leads.totalGenerated || 0, color: '#6366F1', detail: 'Posted by buyers' },
+    { stage: '2. Circulated', count: overview.leads.totalCirculated || 0, color: '#0EA5E9', detail: 'Dispatched to matching sellers' },
+    { stage: '3. Unlocked', count: overview.leads.contactsUnlocked || 0, color: '#F59E0B', detail: 'Credit consumed by sellers' },
+    { stage: '4. Quotations', count: overview.leads.quotationsSent || 0, color: '#8B5CF6', detail: 'Price proposals submitted' },
+    { stage: '5. Closed Deals', count: overview.leads.dealsClosed || 0, color: '#10B981', detail: 'Proposals accepted by buyers' },
+  ], [overview.leads]);
 
-  const totalRevenue = planSummaries.reduce((sum, plan) => sum + plan.revenue, 0);
-  const totalSubscribers = assignments.length;
-  const paidSubscribers = planSummaries.reduce((sum, plan) => sum + (plan.price > 0 ? plan.assignedCount : 0), 0);
+  // Chart 3: Monthly Revenue Trend (Area Chart)
+  const revenueTrendData = useMemo(() => {
+    if (overview.revenue?.monthlyTrend?.length) {
+      return overview.revenue.monthlyTrend.map((pt) => ({
+        month: pt.month,
+        revenue: toNumber(pt.revenue),
+        count: pt.count || 0,
+      }));
+    }
+    return [
+      { month: 'Apr', revenue: 0, count: 0 },
+      { month: 'May', revenue: 0, count: 0 },
+      { month: 'Jun', revenue: 0, count: 0 },
+      { month: 'Jul', revenue: 0, count: 0 },
+      { month: 'Aug', revenue: 0, count: 0 },
+      { month: 'Sep', revenue: toNumber(overview.revenue?.thisMonthRevenue || 0), count: overview.revenue?.totalPaidCount || 0 },
+    ];
+  }, [overview.revenue]);
 
-  const pieSegments = useMemo(
-    () => [
-      { label: 'Business', value: stats.business, color: '#16A34A' },
-      { label: 'Users', value: stats.users, color: '#4F46E5' },
-      { label: 'Logistics', value: stats.logistics, color: '#F59E0B' },
-      { label: 'Insurance', value: stats.insurance, color: '#0EA5E9' },
-      { label: 'Other', value: stats.other, color: '#A855F7' },
-    ],
-    [stats]
-  );
+  // Account Mix Donut Data
+  const accountMixData = useMemo(() => {
+    const business = overview.accounts.businessProfiles || 0;
+    const individual = overview.accounts.individualUsers || 0;
+    const other = Math.max(0, overview.accounts.totalAccounts - (business + individual));
+    return [
+      { name: 'Businesses', value: business, color: '#10B981' },
+      { name: 'Individuals', value: individual, color: '#6366F1' },
+      { name: 'Others', value: other, color: '#94A3B8' },
+    ];
+  }, [overview.accounts]);
 
-  const totalAccounts = Math.max(stats.total, 1);
-  const donutRadius = 46;
-  const donutCircumference = 2 * Math.PI * donutRadius;
-  let donutOffset = 0;
-  const donutSegments = pieSegments.map((segment) => {
-    const length = (segment.value / totalAccounts) * donutCircumference;
-    const dashArray = `${length} ${donutCircumference - length}`;
-    const dashOffset = -donutOffset;
-    donutOffset += length;
-    return { ...segment, dashArray, dashOffset };
-  });
-
-  const planBars = useMemo(() => {
-    if (!planSummaries.length) return [];
-    const palette = ['#6366F1', '#14B8A6', '#F97316', '#22C55E', '#A855F7'];
-    const sorted = [...planSummaries].sort((a, b) => b.revenue - a.revenue).slice(0, 4);
-    const maxRevenue = Math.max(...sorted.map((plan) => plan.revenue), 1);
-    return sorted.map((plan, index) => ({
-      id: plan.planId || plan.id || `${index}`,
-      label: getPlanLabel(plan),
-      revenue: plan.revenue,
-      percent: maxRevenue ? (plan.revenue / maxRevenue) * 100 : 0,
-      color: palette[index % palette.length],
-      count: plan.assignedCount,
-    }));
-  }, [planSummaries]);
-
-  const sparkSeed = stats.total * 0.13 + paidSubscribers * 0.27 + totalRevenue * 0.0005;
-  const totalTrend = useMemo(() => buildTrend(sparkSeed, Math.max(totalSubscribers, 1)), [sparkSeed, totalSubscribers]);
-  const paidTrend = useMemo(
-    () => buildTrend(sparkSeed + 1.7, Math.max(paidSubscribers, 1)),
-    [sparkSeed, paidSubscribers]
-  );
-  const sparkWidth = 360;
-  const sparkHeight = 160;
-  const sparkPad = 16;
-  const totalCoords = buildSparkCoords(totalTrend, sparkWidth, sparkHeight, sparkPad);
-  const paidCoords = buildSparkCoords(paidTrend, sparkWidth, sparkHeight, sparkPad);
-  const totalArea = coordsToArea(totalCoords, sparkHeight, sparkPad);
+  const topPlans = overview.revenue?.topPlans || [];
+  const maxPlanRev = Math.max(...topPlans.map((p) => toNumber(p.revenue)), 1);
 
   return (
-    <div>
-      <div className="panel-head">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
+      {/* ── Page Header ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h2 className="panel-title">Overview</h2>
-          <p className="panel-subtitle">Quick counts across Traddex users and businesses.</p>
+          <h2 style={{ fontSize: '20px', fontWeight: 700, margin: 0, color: 'var(--text, #0f172a)', letterSpacing: '-0.02em' }}>
+            System Dashboard
+          </h2>
+          <p style={{ margin: '2px 0 0', fontSize: '13px', color: 'var(--muted, #64748b)' }}>
+            Real-time analytics across accounts, product catalog health, lead pipeline & revenue.
+          </p>
+        </div>
+
+        {/* Sync Status & Minimal Icon-Only Refresh */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'var(--panel, #ffffff)',
+              border: '1px solid var(--line, #e2e8f0)',
+              borderRadius: '20px',
+              padding: '4px 10px',
+              fontSize: '11px',
+              color: 'var(--muted, #64748b)',
+            }}
+          >
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: '#10B981',
+                boxShadow: '0 0 6px rgba(16, 185, 129, 0.6)',
+              }}
+            />
+            <span>Live: {lastSynced}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => loadStats(false)}
+            disabled={isLoading}
+            title="Refresh data"
+            aria-label="Refresh data"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '9px',
+              border: '1px solid var(--line, #e2e8f0)',
+              background: 'var(--panel, #ffffff)',
+              color: 'var(--text, #0f172a)',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s ease',
+              opacity: isLoading ? 0.6 : 1,
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                transition: 'transform 0.4s ease',
+                transform: isLoading ? 'rotate(180deg)' : 'none',
+              }}
+            >
+              <path d="M23 4v6h-6" />
+              <path d="M1 20v-6h6" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+          </button>
         </div>
       </div>
+
       <Banner message={message} />
-      <div className="stat-grid">
-        <div className="stat-card admin-stat" style={statTone('#4F46E5')}>
-          <div className="stat-card-content">
-            <span className="stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path
-                  d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm8.5-2.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM2.5 20a5.5 5.5 0 0 1 11 0v1h-11v-1Zm12 1v-1a7 7 0 0 0-1.2-3.9 5 5 0 0 1 8.2 3.9v1h-7Z"
-                  fill="currentColor"
-                />
-              </svg>
+
+      {/* ── Top Executive Hero KPIs (4 Minimal Cards) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '14px' }}>
+        {/* Total Accounts */}
+        <div
+          onClick={() => navigate('/admin/businesses')}
+          style={{
+            background: 'var(--panel, #ffffff)',
+            border: '1px solid var(--line, #e2e8f0)',
+            borderRadius: '16px',
+            padding: '18px 20px',
+            cursor: 'pointer',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.06)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #64748b)' }}>
+              Total Accounts
             </span>
-            <div>
-              <p className="stat-label">Total accounts</p>
-              <p className="stat-value">{stats.total}</p>
-              <p className="stat-sub">All registered profiles</p>
+            <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(99, 102, 241, 0.08)', color: '#6366F1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 3s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
+              </svg>
             </div>
           </div>
-        </div>
-        <div className="stat-card admin-stat" style={statTone('#16A34A')}>
-          <div className="stat-card-content">
-            <span className="stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path
-                  d="M7 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2h3v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7h5Zm2 0h6V5H9v2Zm-2 4h10v2H7v-2Zm0 4h6v2H7v-2Z"
-                  fill="currentColor"
-                />
-              </svg>
-            </span>
-            <div>
-              <p className="stat-label">Business profiles</p>
-              <p className="stat-value">{stats.business}</p>
-              <p className="stat-sub">Business userType</p>
-            </div>
+          <div style={{ fontSize: '26px', fontWeight: 700, color: 'var(--text, #0f172a)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+            {overview.accounts.totalAccounts}
+          </div>
+          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--muted, #64748b)', display: 'flex', gap: '8px' }}>
+            <span><strong style={{ color: '#10B981', fontWeight: 600 }}>{overview.accounts.businessProfiles}</strong> Businesses</span>
+            <span>•</span>
+            <span><strong style={{ color: '#6366F1', fontWeight: 600 }}>{overview.accounts.individualUsers}</strong> Users</span>
           </div>
         </div>
-        <div className="stat-card admin-stat" style={statTone('#A855F7')}>
-          <div className="stat-card-content">
-            <span className="stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path
-                  d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm-6 8a6 6 0 0 1 12 0v1H6v-1Z"
-                  fill="currentColor"
-                />
-              </svg>
+
+        {/* Products Live on App */}
+        <div
+          onClick={() => navigate('/admin/products')}
+          style={{
+            background: 'var(--panel, #ffffff)',
+            border: '1px solid var(--line, #e2e8f0)',
+            borderRadius: '16px',
+            padding: '18px 20px',
+            cursor: 'pointer',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.06)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #64748b)' }}>
+              Live on Mobile App
             </span>
-            <div>
-              <p className="stat-label">Individual users</p>
-              <p className="stat-value">{stats.users}</p>
-              <p className="stat-sub">User userType</p>
+            <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.08)', color: '#10B981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+              </svg>
             </div>
           </div>
-        </div>
-        <div className="stat-card admin-stat" style={statTone('#0EA5E9')}>
-          <div className="stat-card-content">
-            <span className="stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path
-                  d="M4 6h16a2 2 0 0 1 2 2v2H2V8a2 2 0 0 1 2-2Zm-2 6h20v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6Zm3 3h6v2H5v-2Z"
-                  fill="currentColor"
-                />
-              </svg>
-            </span>
-            <div>
-              <p className="stat-label">Active subscriptions</p>
-              <p className="stat-value">{totalSubscribers}</p>
-              <p className="stat-sub">Assignments</p>
-            </div>
+          <div style={{ fontSize: '26px', fontWeight: 700, color: 'var(--text, #0f172a)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+            {overview.products.liveOnApp}
+          </div>
+          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+            {overview.products.pendingReview > 0 ? (
+              <span style={{ color: '#F59E0B', fontWeight: 600 }}>{overview.products.pendingReview} Pending Approval</span>
+            ) : (
+              <span>0 Pending</span>
+            )}{' '}
+            • {overview.products.totalProducts} Total Catalog
           </div>
         </div>
-        <div className="stat-card admin-stat" style={statTone('#F59E0B')}>
-          <div className="stat-card-content">
-            <span className="stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path
-                  d="M4 16l5-5 4 4 7-7v4h2V4h-8v2h4l-5 5-4-4-7 7z"
-                  fill="currentColor"
-                />
-              </svg>
+
+        {/* Lead Engine Inquiries */}
+        <div
+          onClick={() => navigate('/admin/inquiry/leads')}
+          style={{
+            background: 'var(--panel, #ffffff)',
+            border: '1px solid var(--line, #e2e8f0)',
+            borderRadius: '16px',
+            padding: '18px 20px',
+            cursor: 'pointer',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.06)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #64748b)' }}>
+              Inquiries & Leads
             </span>
-            <div>
-              <p className="stat-label">Subscription revenue</p>
-              <p className="stat-value">{formatCurrency(totalRevenue)}</p>
-              <p className="stat-sub">Estimated monthly</p>
+            <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.08)', color: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
+              </svg>
             </div>
+          </div>
+          <div style={{ fontSize: '26px', fontWeight: 700, color: 'var(--text, #0f172a)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+            {overview.leads.totalGenerated}
+          </div>
+          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+            <strong style={{ color: '#10B981', fontWeight: 600 }}>{overview.leads.dealsClosed}</strong> Deals Closed ({overview.leads.conversionRate}% Rate)
+          </div>
+        </div>
+
+        {/* Platform Revenue */}
+        <div
+          onClick={() => navigate('/admin/revenue/subscription')}
+          style={{
+            background: 'var(--panel, #ffffff)',
+            border: '1px solid var(--line, #e2e8f0)',
+            borderRadius: '16px',
+            padding: '18px 20px',
+            cursor: 'pointer',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.06)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #64748b)' }}>
+              Platform Revenue
+            </span>
+            <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(14, 165, 233, 0.08)', color: '#0EA5E9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.41 16.09V20h-2.67v-1.93c-1.71-.36-3.16-1.46-3.27-3.4h1.96c.1 1.05.82 1.87 2.65 1.87 1.96 0 2.4-.98 2.4-1.59 0-.83-.44-1.61-2.67-2.14-2.48-.6-4.18-1.62-4.18-3.67 0-1.72 1.39-2.84 3.11-3.21V4h2.67v1.95c1.86.45 2.79 1.86 2.85 3.39H14.3c-.05-.88-.53-1.84-2.2-1.84-1.6 0-2.18.77-2.18 1.52 0 .76.54 1.33 2.51 1.81 2.69.65 4.34 1.63 4.34 3.73 0 1.6-1.12 2.89-3.36 3.53z" />
+              </svg>
+            </div>
+          </div>
+          <div style={{ fontSize: '26px', fontWeight: 700, color: 'var(--text, #0f172a)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+            {formatCurrency(overview.revenue.totalRevenue)}
+          </div>
+          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+            {formatCurrency(overview.revenue.thisMonthRevenue)} this mo • {overview.revenue.activeSubscriptions} Active Subs
           </div>
         </div>
       </div>
 
-      <div className="dashboard-analytics">
-        <div className="panel card chart-card">
-          <div className="chart-head">
-            <div>
-              <h3>Account mix</h3>
-              <p>Users vs business distribution</p>
+      {/* ── CHART 1 & CATALOG SECTION: Product Catalog Health with Interactive Pie/Donut Chart ── */}
+      <div
+        style={{
+          background: 'var(--panel, #ffffff)',
+          border: '1px solid var(--line, #e2e8f0)',
+          borderRadius: '16px',
+          padding: '20px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--text, #0f172a)' }}>
+                1. Product Catalog Health & Distribution
+              </h3>
+              <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.08)', color: '#6366F1' }}>
+                {overview.products.totalProducts} Total Items
+              </span>
             </div>
-            <span className="chart-pill">Live</span>
+            <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+              Interactive breakdown of catalog status across Mobile App, Pending Moderation, Drafts & Website.
+            </p>
           </div>
-          <div className="chart-body">
-            <div className="donut-shell">
-              <svg className="donut" viewBox="0 0 120 120" aria-hidden="true">
-                <circle className="donut-ring" cx="60" cy="60" r={donutRadius} />
-                {donutSegments.map((segment) => (
-                  <circle
-                    key={segment.label}
-                    className="donut-segment"
-                    cx="60"
-                    cy="60"
-                    r={donutRadius}
-                    stroke={segment.color}
-                    strokeDasharray={segment.dashArray}
-                    strokeDashoffset={segment.dashOffset}
-                  />
-                ))}
-              </svg>
-              <div className="donut-center">
-                <span>Total</span>
-                <strong>{stats.total}</strong>
+
+          <button
+            type="button"
+            onClick={() => navigate('/admin/products')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              border: '1px solid var(--line, #e2e8f0)',
+              background: 'transparent',
+              fontSize: '12px',
+              fontWeight: 500,
+              color: 'var(--text, #0f172a)',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(0,0,0,0.03)';
+              e.currentTarget.style.borderColor = 'var(--text, #0f172a)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.borderColor = 'var(--line, #e2e8f0)';
+            }}
+          >
+            <span>Manage Products</span>
+            <span style={{ fontSize: '14px', lineHeight: 1 }}>→</span>
+          </button>
+        </div>
+
+        {/* 2-Column: Left = Tiles & Progress, Right = Recharts Donut */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', alignItems: 'center' }}>
+          {/* Left Column: 4 Metric Tiles */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              {/* Live on Mobile App */}
+              <div
+                onClick={() => navigate('/admin/products')}
+                style={{
+                  border: '1px solid var(--line, #e2e8f0)',
+                  borderRadius: '12px',
+                  padding: '12px 14px',
+                  cursor: 'pointer',
+                  background: 'var(--bg, #f8fafc)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--muted, #64748b)' }}>Live on App</span>
+                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#10B981' }} />
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: '#10B981' }}>{overview.products.liveOnApp}</div>
+                <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)', marginTop: '2px' }}>Approved & visible</div>
+              </div>
+
+              {/* Pending Review */}
+              <div
+                onClick={() => navigate('/admin/products')}
+                style={{
+                  border: overview.products.pendingReview > 0 ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid var(--line, #e2e8f0)',
+                  borderRadius: '12px',
+                  padding: '12px 14px',
+                  cursor: 'pointer',
+                  background: overview.products.pendingReview > 0 ? 'rgba(245, 158, 11, 0.04)' : 'var(--bg, #f8fafc)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--muted, #64748b)' }}>Pending Review</span>
+                  {overview.products.pendingReview > 0 && (
+                    <span style={{ fontSize: '9px', fontWeight: 700, color: '#F59E0B', background: 'rgba(245, 158, 11, 0.15)', padding: '1px 5px', borderRadius: '3px' }}>
+                      ACTION
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: overview.products.pendingReview > 0 ? '#F59E0B' : 'var(--text, #0f172a)' }}>
+                  {overview.products.pendingReview}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)', marginTop: '2px' }}>Needs admin check</div>
+              </div>
+
+              {/* Draft Products */}
+              <div
+                onClick={() => navigate('/admin/products')}
+                style={{
+                  border: '1px solid var(--line, #e2e8f0)',
+                  borderRadius: '12px',
+                  padding: '12px 14px',
+                  cursor: 'pointer',
+                  background: 'var(--bg, #f8fafc)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--muted, #64748b)' }}>Draft Products</span>
+                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#94A3B8' }} />
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text, #0f172a)' }}>{overview.products.drafts}</div>
+                <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)', marginTop: '2px' }}>Unpublished</div>
+              </div>
+
+              {/* Website Storefront Live */}
+              <div
+                onClick={() => navigate('/admin/products')}
+                style={{
+                  border: '1px solid var(--line, #e2e8f0)',
+                  borderRadius: '12px',
+                  padding: '12px 14px',
+                  cursor: 'pointer',
+                  background: 'var(--bg, #f8fafc)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--muted, #64748b)' }}>Website Live</span>
+                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#8B5CF6' }} />
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: '#8B5CF6' }}>{overview.products.websiteLive}</div>
+                <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)', marginTop: '2px' }}>Public storefront</div>
               </div>
             </div>
-            <div className="chart-legend">
-              {pieSegments.map((segment) => (
-                <div key={segment.label} className="legend-item">
-                  <span className="legend-dot" style={{ background: segment.color }} />
-                  <span className="legend-label">{segment.label}</span>
-                  <span className="legend-value">{segment.value}</span>
-                </div>
-              ))}
+
+            {/* Minimal Progress Bar */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted, #64748b)', marginBottom: '5px' }}>
+                <span>Live App Ratio: <strong>{liveProductPct}%</strong></span>
+                <span>{overview.products.liveOnApp} of {overview.products.totalProducts}</span>
+              </div>
+              <div style={{ width: '100%', height: '5px', background: 'var(--line, #e2e8f0)', borderRadius: '999px', overflow: 'hidden', display: 'flex' }}>
+                <div style={{ width: `${liveProductPct}%`, background: '#10B981', transition: 'width 0.4s ease' }} />
+                <div style={{ width: `${overview.products.totalProducts > 0 ? (overview.products.pendingReview / overview.products.totalProducts) * 100 : 0}%`, background: '#F59E0B' }} />
+                <div style={{ width: `${overview.products.totalProducts > 0 ? (overview.products.drafts / overview.products.totalProducts) * 100 : 0}%`, background: '#94A3B8' }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Recharts Donut Chart */}
+          <div style={{ height: '190px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={productChartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={75}
+                  paddingAngle={3}
+                  dataKey="value"
+                >
+                  {productChartData.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} stroke="none" />
+                  ))}
+                </Pie>
+                <RechartsTooltip content={<MinimalTooltip />} />
+              </PieChart>
+            </ResponsiveContainer>
+            {/* Center Label */}
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text, #0f172a)', lineHeight: 1 }}>
+                {overview.products.totalProducts}
+              </div>
+              <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--muted, #64748b)', letterSpacing: '0.04em', marginTop: '2px' }}>
+                Catalog
+              </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="panel card chart-card">
-          <div className="chart-head">
-            <div>
-              <h3>Subscription revenue</h3>
-              <p>Top plans by revenue</p>
+      {/* ── CHART 2 & FUNNEL SECTION: Lead Engine Funnel with Horizontal Bar Chart ── */}
+      <div
+        style={{
+          background: 'var(--panel, #ffffff)',
+          border: '1px solid var(--line, #e2e8f0)',
+          borderRadius: '16px',
+          padding: '20px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--text, #0f172a)' }}>
+                2. Lead Engine & Conversion Funnel Chart
+              </h3>
+              <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.08)', color: '#10B981' }}>
+                {overview.leads.conversionRate}% Overall Conversion
+              </span>
             </div>
-            <span className="chart-pill">{formatCurrency(totalRevenue)}</span>
+            <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+              Step-by-step conversion pipeline from Inquiry creation to Deal closing.
+            </p>
           </div>
-          {planBars.length === 0 ? (
-            <p className="empty-state">No subscription data yet.</p>
+
+          <button
+            type="button"
+            onClick={() => navigate('/admin/inquiry/leads')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              border: '1px solid var(--line, #e2e8f0)',
+              background: 'transparent',
+              fontSize: '12px',
+              fontWeight: 500,
+              color: 'var(--text, #0f172a)',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(0,0,0,0.03)';
+              e.currentTarget.style.borderColor = 'var(--text, #0f172a)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.borderColor = 'var(--line, #e2e8f0)';
+            }}
+          >
+            <span>View All Leads</span>
+            <span style={{ fontSize: '14px', lineHeight: 1 }}>→</span>
+          </button>
+        </div>
+
+        {/* 5 Minimal Horizontal Step Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '16px' }}>
+          {leadFunnelData.map((step) => (
+            <div
+              key={step.stage}
+              style={{
+                border: '1px solid var(--line, #e2e8f0)',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                background: 'var(--bg, #f8fafc)',
+              }}
+            >
+              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: step.color, letterSpacing: '0.04em' }}>
+                {step.stage}
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text, #0f172a)', margin: '4px 0 2px' }}>
+                {step.count}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>{step.detail}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Recharts Horizontal Funnel Bar Chart */}
+        <div style={{ width: '100%', height: '180px', marginTop: '10px' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={leadFunnelData}
+              layout="vertical"
+              margin={{ top: 5, right: 30, left: 60, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line, #e2e8f0)" horizontal={false} opacity={0.5} />
+              <XAxis type="number" stroke="var(--muted, #64748b)" fontSize={11} tickLine={false} />
+              <YAxis
+                type="category"
+                dataKey="stage"
+                stroke="var(--muted, #64748b)"
+                fontSize={11}
+                tickLine={false}
+                axisLine={false}
+              />
+              <RechartsTooltip content={<MinimalTooltip />} />
+              <Bar dataKey="count" name="Volume" radius={[0, 6, 6, 0]} barSize={16}>
+                {leadFunnelData.map((entry) => (
+                  <Cell key={entry.stage} fill={entry.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Funnel Efficiency Metrics Footer */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '12px', color: 'var(--muted, #64748b)', padding: '6px 0 0' }}>
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+            <span>
+              Circulation Multiplier: <strong style={{ color: 'var(--text, #0f172a)' }}>{overview.leads.totalGenerated > 0 ? (overview.leads.totalCirculated / overview.leads.totalGenerated).toFixed(1) : 0}x</strong> (sellers/inquiry)
+            </span>
+            <span>
+              Quote-to-Close Rate: <strong style={{ color: '#10B981' }}>{overview.leads.quotationsSent > 0 ? ((overview.leads.dealsClosed / overview.leads.quotationsSent) * 100).toFixed(1) : 0}%</strong>
+            </span>
+          </div>
+          <span style={{ fontSize: '11px' }}>Database real-time aggregate</span>
+        </div>
+      </div>
+
+      {/* ── CHART 3 & FINANCIAL SECTION: Monthly Revenue Growth Area Chart + Account Mix ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px' }}>
+        {/* Chart 3: Monthly Revenue Smooth Area Chart (Takes 1.5x width if space allows) */}
+        <div
+          style={{
+            background: 'var(--panel, #ffffff)',
+            border: '1px solid var(--line, #e2e8f0)',
+            borderRadius: '16px',
+            padding: '20px',
+            gridColumn: 'span 2',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <div>
+              <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--text, #0f172a)' }}>
+                3. Platform Revenue & Transaction Momentum
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+                6-Month continuous gross revenue and payment transaction volume.
+              </p>
+            </div>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#0EA5E9' }}>
+              {formatCurrency(overview.revenue.totalRevenue)}
+            </span>
+          </div>
+
+          <div style={{ width: '100%', height: '220px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={revenueTrendData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0EA5E9" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#0EA5E9" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--line, #e2e8f0)" opacity={0.5} vertical={false} />
+                <XAxis dataKey="month" stroke="var(--muted, #64748b)" fontSize={11} tickLine={false} />
+                <YAxis
+                  stroke="var(--muted, #64748b)"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v) => (v >= 1000 ? `₹${(v / 1000).toFixed(0)}k` : `₹${v}`)}
+                />
+                <RechartsTooltip
+                  content={
+                    <MinimalTooltip
+                      formatter={(val) => formatCurrency(val)}
+                      prefix=""
+                    />
+                  }
+                />
+                <Area
+                  type="monotone"
+                  dataKey="revenue"
+                  name="Revenue"
+                  stroke="#0EA5E9"
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#revGrad)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Account Mix Donut Chart */}
+        <div style={{ background: 'var(--panel, #ffffff)', border: '1px solid var(--line, #e2e8f0)', borderRadius: '16px', padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, margin: 0, color: 'var(--text, #0f172a)' }}>Account Mix</h3>
+              <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>Profile type distribution</p>
+            </div>
+            <span style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>{overview.accounts.totalAccounts} Total</span>
+          </div>
+
+          <div style={{ height: '180px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={accountMixData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={46}
+                  outerRadius={68}
+                  paddingAngle={3}
+                  dataKey="value"
+                >
+                  {accountMixData.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} stroke="none" />
+                  ))}
+                </Pie>
+                <RechartsTooltip content={<MinimalTooltip />} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              <div style={{ fontSize: '17px', fontWeight: 800, color: 'var(--text, #0f172a)', lineHeight: 1 }}>
+                {overview.accounts.totalAccounts}
+              </div>
+              <div style={{ fontSize: '9px', textTransform: 'uppercase', color: 'var(--muted, #64748b)', letterSpacing: '0.04em', marginTop: '2px' }}>
+                Accounts
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '6px' }}>
+            {accountMixData.map((item) => (
+              <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: item.color }} />
+                <span style={{ color: 'var(--muted, #64748b)' }}>{item.name}:</span>
+                <strong style={{ color: 'var(--text, #0f172a)' }}>{item.value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Top Subscription Plans Breakdown */}
+        <div style={{ background: 'var(--panel, #ffffff)', border: '1px solid var(--line, #e2e8f0)', borderRadius: '16px', padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <div>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, margin: 0, color: 'var(--text, #0f172a)' }}>Subscription Plans</h3>
+              <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>Top active plans by subscriber volume</p>
+            </div>
+            <span style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>{overview.revenue.activeSubscriptions} Active</span>
+          </div>
+
+          {topPlans.length === 0 ? (
+            <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', padding: '24px 0', textAlign: 'center' }}>
+              No active subscription plans assigned yet.
+            </div>
           ) : (
-            <div className="bar-chart">
-              {planBars.map((bar) => (
-                <div key={bar.id} className="bar-row">
-                  <div className="bar-label">{bar.label}</div>
-                  <div className="bar-track">
-                    <span className="bar-fill" style={{ width: `${bar.percent}%`, background: bar.color }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {topPlans.map((plan) => {
+                const pct = maxPlanRev > 0 ? (toNumber(plan.revenue) / maxPlanRev) * 100 : 0;
+                return (
+                  <div key={plan.planId || plan.planName} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--text, #0f172a)' }}>{plan.planName}</span>
+                      <span style={{ color: 'var(--muted, #64748b)' }}>
+                        <strong>{plan.activeCount}</strong> users ({formatCurrency(plan.revenue)})
+                      </span>
+                    </div>
+                    <div style={{ width: '100%', height: '5px', background: 'var(--line, #e2e8f0)', borderRadius: '999px', overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.max(pct, 4)}%`, height: '100%', background: '#6366F1', borderRadius: '999px' }} />
+                    </div>
                   </div>
-                  <div className="bar-value">
-                    {formatCurrency(bar.revenue)}
-                    <span>{bar.count} users</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
-        </div>
-
-        <div className="panel card chart-card wide">
-          <div className="chart-head">
-            <div>
-              <h3>Subscription momentum</h3>
-              <p>Paid vs total subscribers</p>
-            </div>
-            <div className="chart-badges">
-              <span className="chart-badge paid">Paid {paidSubscribers}</span>
-              <span className="chart-badge total">Total {totalSubscribers}</span>
-            </div>
-          </div>
-          <div className="sparkline-wrap">
-            <svg className="sparkline" viewBox={`0 0 ${sparkWidth} ${sparkHeight}`} aria-hidden="true">
-              <defs>
-                <linearGradient id="sparkFill" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="rgba(56, 189, 248, 0.4)" />
-                  <stop offset="100%" stopColor="rgba(56, 189, 248, 0.02)" />
-                </linearGradient>
-              </defs>
-              <path className="sparkline-area" d={totalArea} fill="url(#sparkFill)" />
-              <polyline
-                className="sparkline-line primary"
-                points={coordsToPoints(totalCoords)}
-                pathLength="100"
-              />
-              <polyline
-                className="sparkline-line secondary"
-                points={coordsToPoints(paidCoords)}
-                pathLength="100"
-              />
-            </svg>
-          </div>
         </div>
       </div>
     </div>

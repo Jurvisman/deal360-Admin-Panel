@@ -4002,13 +4002,16 @@ function AppConfigPage({ token }) {
   }, [pageIndustryId]);
 
   const resolvedMultiItemGridScope = useMemo(() => {
+    if (sectionForm.multiItemGridScope) {
+      return sectionForm.multiItemGridScope;
+    }
     const selectedIndustryId = normalizeCollectionId(sectionForm.sourceIndustryId);
     if (!selectedIndustryId) return 'ALL';
     if (pageIndustryId && normalizeMatchValue(selectedIndustryId) === normalizeMatchValue(pageIndustryId)) {
       return 'PAGE_INDUSTRY';
     }
     return 'SPECIFIC_INDUSTRY';
-  }, [pageIndustryId, sectionForm.sourceIndustryId]);
+  }, [pageIndustryId, sectionForm.sourceIndustryId, sectionForm.multiItemGridScope]);
 
   const handleMultiItemGridScopeChange = (nextScope) => {
     setSectionForm((prev) => {
@@ -4020,6 +4023,7 @@ function AppConfigPage({ token }) {
       if (nextScope === 'ALL') {
         return {
           ...prev,
+          multiItemGridScope: 'ALL',
           sourceIndustryId: '',
           sourceMainCategoryId: '',
           sourceCategoryIds: [],
@@ -4030,18 +4034,20 @@ function AppConfigPage({ token }) {
         const shouldResetTaxonomy = !isUsingPageIndustry;
         return {
           ...prev,
+          multiItemGridScope: 'PAGE_INDUSTRY',
           sourceIndustryId: pageIndustryId,
           sourceMainCategoryId: shouldResetTaxonomy ? '' : prev.sourceMainCategoryId,
           sourceCategoryIds: shouldResetTaxonomy ? [] : prev.sourceCategoryIds,
         };
       }
 
-      if (nextScope === 'SPECIFIC_INDUSTRY' && isUsingPageIndustry) {
+      if (nextScope === 'SPECIFIC_INDUSTRY') {
         return {
           ...prev,
-          sourceIndustryId: '',
-          sourceMainCategoryId: '',
-          sourceCategoryIds: [],
+          multiItemGridScope: 'SPECIFIC_INDUSTRY',
+          sourceIndustryId: isUsingPageIndustry ? '' : prev.sourceIndustryId,
+          sourceMainCategoryId: isUsingPageIndustry ? '' : prev.sourceMainCategoryId,
+          sourceCategoryIds: isUsingPageIndustry ? [] : prev.sourceCategoryIds,
         };
       }
 
@@ -7877,6 +7883,7 @@ function AppConfigPage({ token }) {
                                   onChange={(event) =>
                                     setSectionForm((prev) => ({
                                       ...prev,
+                                      multiItemGridScope: 'SPECIFIC_INDUSTRY',
                                       sourceIndustryId: event.target.value,
                                       sourceMainCategoryId: '',
                                       sourceCategoryIds: [],
