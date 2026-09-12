@@ -754,3 +754,8 @@ export const fetchSupportTicketById = (token, id) =>
 
 export const updateSupportTicketStatus = (token, id, payload) =>
   request(`/admin/support/tickets/${id}/status`, { method: 'PUT', body: payload, token });
+
+// ── Dashboard Overview Tracking ──────────────────────────────
+export const getDashboardOverview = (token) =>
+  request('/admin/dashboard/overview', { token });
+

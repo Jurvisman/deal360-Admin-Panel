@@ -6050,6 +6050,7 @@ export const defaultSectionForm = {
   targetSubscriptionStatuses: '',
   sourceType: 'MANUAL',
   sourceBusinessUserIds: [],
+  multiItemGridScope: '',
   sourceIndustryId: '',
   sourceFeedMode: 'TOP_SELLING',
   productFeedMode: 'FREQUENTLY_BOUGHT',

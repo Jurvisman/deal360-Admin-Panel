@@ -741,6 +741,7 @@ export const buildSectionFormFromConfig = (section, fallbackType) => {
           : section?.sourceType) ||
       'MANUAL',
     sourceIndustryId: source?.industryId ? String(source.industryId) : (section?.sourceIndustryId ? String(section.sourceIndustryId) : ''),
+    multiItemGridScope: source?.industryId || section?.sourceIndustryId ? 'SPECIFIC_INDUSTRY' : '',
     sourceBusinessUserIds: Array.isArray(source?.businessUserIds)
       ? source.businessUserIds.map((value) => normalizeCollectionId(value)).filter(Boolean)
       : Array.isArray(section?.items)
