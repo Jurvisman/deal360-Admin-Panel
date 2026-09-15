@@ -307,6 +307,7 @@ const initialForm = {
   categoryId: '',
   subCategoryId: '',
   sellingPrice: '',
+  maxPrice: '',
   mrp: '',
   gstRate: '',
   userId: '',
@@ -448,6 +449,58 @@ const getProductRecordId = (product) => product?.id || product?.productId || nul
 const getProductCode = (product) => product?.sku || product?.productCode || `PRD-${getProductRecordId(product) || '-'}`;
 const getProductSellingPrice = (product) => product?.sellingPrice ?? product?.priceRange?.min ?? null;
 const getProductMrp = (product) => product?.mrp ?? product?.priceRange?.max ?? null;
+
+const formatPrice = (value, currency = 'INR') => {
+  if (value === null || value === undefined || value === '') return '-';
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return String(value);
+  const normalizedCurrency = String(currency || 'INR').trim().toUpperCase();
+  if (!normalizedCurrency || normalizedCurrency === 'INR' || normalizedCurrency === 'RS') {
+    return `Rs ${amount.toLocaleString('en-IN', {
+      minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: normalizedCurrency,
+      minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch (error) {
+    return amount.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  }
+};
+
+const getProductPriceRangeInfo = (product) => {
+  const dyn = product?.dynamicAttributes || {};
+  const legacy = dyn._legacy || {};
+  const isRange =
+    dyn.selling_model === 'PRICE_RANGE' ||
+    dyn.sellingModel === 'PRICE_RANGE' ||
+    legacy.selling_model === 'PRICE_RANGE' ||
+    legacy.sellingModel === 'PRICE_RANGE';
+  const minP = dyn.minPrice ?? dyn.min_price ?? legacy.minPrice ?? legacy.min_price ?? product?.sellingPrice ?? null;
+  const maxP = dyn.maxPrice ?? dyn.max_price ?? legacy.maxPrice ?? legacy.max_price ?? (isRange ? product?.mrp : null) ?? null;
+  const pRange = dyn.price_range || dyn.priceRange || legacy.price_range || legacy.priceRange || null;
+  const isRangeProduct = isRange || Boolean(pRange) || Boolean(minP && maxP && Number(maxP) > Number(minP));
+  let formatted = null;
+  if (minP && maxP && Number(maxP) > Number(minP)) {
+    formatted = `${formatPrice(minP, product?.currency)} - ${formatPrice(maxP, product?.currency)}`;
+  } else if (pRange) {
+    formatted = String(pRange);
+  } else if (minP !== null && minP !== undefined) {
+    formatted = formatPrice(minP, product?.currency);
+  }
+  return { isRange: isRangeProduct, minPrice: minP, maxPrice: maxP, formatted };
+};
+
+const getProductPriceDisplay = (product) => {
+  const info = getProductPriceRangeInfo(product);
+  if (info.isRange && info.formatted) return info.formatted;
+  return formatPrice(getProductSellingPrice(product), product?.currency);
+};
 const getProductGstRate = (product) => product?.gstRate ?? product?.gst_rate ?? null;
 const getProductHsnCode = (product) => product?.hsnCode ?? product?.hsn_code ?? '';
 const getProductCountryOfOrigin = (product) => product?.countryOfOrigin ?? product?.country_of_origin ?? '';
@@ -1006,29 +1059,6 @@ function ProductPage({ token, adminUserId }) {
     return { primary, secondary };
   }
 
-  const formatPrice = (value, currency = 'INR') => {
-    if (value === null || value === undefined || value === '') return '-';
-    const amount = Number(value);
-    if (!Number.isFinite(amount)) return formatValue(value);
-    const normalizedCurrency = String(currency || 'INR').trim().toUpperCase();
-    if (!normalizedCurrency || normalizedCurrency === 'INR' || normalizedCurrency === 'RS') {
-      return `Rs ${amount.toLocaleString('en-IN', {
-        minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
-        maximumFractionDigits: 2,
-      })}`;
-    }
-    try {
-      return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: normalizedCurrency,
-        minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch (error) {
-      return amount.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-    }
-  };
-
   function isBusinessAccount(user) {
     return String(user?.userType || user?.type || user?.role || '').trim().toUpperCase() === 'BUSINESS';
   }
@@ -1157,10 +1187,25 @@ function ProductPage({ token, adminUserId }) {
         return <span className="product-table-primary">{formatValue(product?.productType)}</span>;
       case 'baseUom':
         return <span className="product-table-primary">{formatValue(product?.baseUomName || product?.baseUomCode)}</span>;
-      case 'sellingPrice':
+      case 'sellingPrice': {
+        const rangeInfo = getProductPriceRangeInfo(product);
+        if (rangeInfo.isRange) {
+          return (
+            <div className="product-price-stack">
+              <span className="product-price-main">{rangeInfo.formatted}</span>
+              <span className="product-price-sub" style={{ fontSize: '0.72rem', color: '#6366f1', fontWeight: 600 }}>Price Range</span>
+            </div>
+          );
+        }
         return <span className="product-price-main">{formatPrice(getProductSellingPrice(product), product?.currency)}</span>;
-      case 'mrp':
+      }
+      case 'mrp': {
+        const rangeInfo = getProductPriceRangeInfo(product);
+        if (rangeInfo.isRange) {
+          return <span className="product-price-main">{product?.mrp ? formatPrice(product.mrp, product?.currency) : '-'}</span>;
+        }
         return <span className="product-price-main">{formatPrice(getProductMrp(product), product?.currency)}</span>;
+      }
       case 'gstRate':
         return <span className="product-table-primary">{formatValue(getProductGstRate(product))}</span>;
       case 'hsnCode':
@@ -1268,7 +1313,7 @@ function ProductPage({ token, adminUserId }) {
         Boolean(product?.category?.categoryId)
       ) || '',
       'Base UOM': product?.baseUomName || product?.baseUomCode || '',
-      'Selling Price': getProductSellingPrice(product) ?? '',
+      'Selling Price': getProductPriceDisplay(product) || getProductSellingPrice(product) || '',
       MRP: getProductMrp(product) ?? '',
       'GST Rate': getProductGstRate(product) ?? '',
       'HSN Code': getProductHsnCode(product) || '',
@@ -2332,6 +2377,18 @@ function ProductPage({ token, adminUserId }) {
       defaultStockInUomId,
       defaultStockOutUomId
     );
+    const rangeInfo = getProductPriceRangeInfo(product);
+    const initialSellingModel = product.dynamicAttributes?.selling_model || (rangeInfo.isRange ? 'PRICE_RANGE' : 'FIXED_PRICE');
+    const initialSellingPrice = rangeInfo.isRange && rangeInfo.minPrice !== null && rangeInfo.minPrice !== undefined
+      ? String(rangeInfo.minPrice)
+      : (product.sellingPrice !== null && product.sellingPrice !== undefined ? String(product.sellingPrice) : '');
+    const initialMaxPrice = rangeInfo.isRange && rangeInfo.maxPrice !== null && rangeInfo.maxPrice !== undefined
+      ? String(rangeInfo.maxPrice)
+      : '';
+    const initialMrp = product.mrp !== null && product.mrp !== undefined
+      ? String(product.mrp)
+      : (rangeInfo.isRange && rangeInfo.maxPrice !== null && rangeInfo.maxPrice !== undefined ? String(rangeInfo.maxPrice) : '');
+
     setForm({
       productName: product.productName || '',
       brandName: product.brandName || '',
@@ -2341,11 +2398,9 @@ function ProductPage({ token, adminUserId }) {
       mainCategoryId: nextMainCategoryId,
       categoryId: nextCategoryId,
       subCategoryId: nextSubCategoryId,
-      sellingPrice:
-        product.sellingPrice !== null && product.sellingPrice !== undefined
-          ? String(product.sellingPrice)
-          : '',
-      mrp: product.mrp !== null && product.mrp !== undefined ? String(product.mrp) : '',
+      sellingPrice: initialSellingPrice,
+      maxPrice: initialMaxPrice,
+      mrp: initialMrp,
       gstRate:
         product.gstRate !== null && product.gstRate !== undefined ? String(product.gstRate) : '',
       userId: '',
@@ -2358,7 +2413,7 @@ function ProductPage({ token, adminUserId }) {
       salesUoms: mirroredUoms.salesUoms,
       uiConfig: Object.keys(productUiConfig || {}).length > 0 ? JSON.stringify(productUiConfig) : '',
       sellingStyle: product.dynamicAttributes?.selling_style || 'PIECE',
-      sellingModel: product.dynamicAttributes?.selling_model || 'FIXED_PRICE',
+      sellingModel: initialSellingModel,
       sellingUnit: product.dynamicAttributes?.selling_unit || 'PCS',
       quantityStep: product.dynamicAttributes?.quantity_step || '1',
       packQuantity: product.dynamicAttributes?.pack_quantity || '',
@@ -2559,16 +2614,52 @@ function ProductPage({ token, adminUserId }) {
       setMessage({ type: 'error', text: 'You do not have permission to create products.' });
       return;
     }
+    const isRange = form.sellingModel === 'PRICE_RANGE';
     if (
       !form.productName.trim() ||
       !form.mainCategoryId ||
       !form.categoryId ||
       !form.sellingPrice ||
-      !form.mrp ||
+      (!isRange && !form.mrp) ||
+      (isRange && !form.maxPrice) ||
       !form.gstRate
     ) {
-      setMessage({ type: 'error', text: 'Fill all required product fields.' });
+      setMessage({
+        type: 'error',
+        text: isRange ? 'Fill all required product fields (including Min Price and Max Price).' : 'Fill all required product fields.',
+      });
       return;
+    }
+
+    const minPriceNum = Number(form.sellingPrice);
+    const maxPriceNum = isRange && form.maxPrice ? Number(form.maxPrice) : null;
+    const finalMrp = isRange && maxPriceNum ? (form.mrp ? Number(form.mrp) : maxPriceNum) : Number(form.mrp);
+
+    if (isRange) {
+      if (Number.isNaN(minPriceNum) || minPriceNum <= 0) {
+        setMessage({ type: 'error', text: 'Min Price must be greater than 0.' });
+        return;
+      }
+      if (Number.isNaN(maxPriceNum) || maxPriceNum <= 0) {
+        setMessage({ type: 'error', text: 'Max Price must be greater than 0.' });
+        return;
+      }
+      if (maxPriceNum <= minPriceNum) {
+        setMessage({
+          type: 'error',
+          text: maxPriceNum === minPriceNum ? 'Min Price and Max Price cannot be equal.' : 'Max Price cannot be less than Min Price.',
+        });
+        return;
+      }
+      if (form.mrp && Number(form.mrp) < maxPriceNum) {
+        setMessage({ type: 'error', text: 'MRP cannot be less than Max Price.' });
+        return;
+      }
+    } else {
+      if (form.mrp && Number(form.mrp) < minPriceNum) {
+        setMessage({ type: 'error', text: 'MRP cannot be less than Selling Price.' });
+        return;
+      }
     }
 
     if (isEditing && !editingProductId) {
@@ -2594,8 +2685,8 @@ function ProductPage({ token, adminUserId }) {
         galleryImages: parseList(form.galleryImagesText),
         mainCategoryId: Number(form.mainCategoryId),
         categoryId: Number(form.categoryId),
-        sellingPrice: Number(form.sellingPrice),
-        mrp: Number(form.mrp),
+        sellingPrice: minPriceNum,
+        mrp: finalMrp,
         gstRate: Number(form.gstRate),
         weight: form.weight ? Number(form.weight) : 0.5,
       };
@@ -2653,6 +2744,20 @@ function ProductPage({ token, adminUserId }) {
       if (form.leadTime) finalDynamicAttributes.lead_time = form.leadTime;
       if (form.deliveryAvailable !== undefined) finalDynamicAttributes.delivery_available = form.deliveryAvailable;
       if (form.pickupAvailable !== undefined) finalDynamicAttributes.pickup_available = form.pickupAvailable;
+
+      if (isRange && maxPriceNum) {
+        finalDynamicAttributes._legacy = {
+          ...(finalDynamicAttributes._legacy || {}),
+          minPrice: minPriceNum,
+          maxPrice: maxPriceNum,
+          price_range: `₹${minPriceNum} - ₹${maxPriceNum}`,
+        };
+        finalDynamicAttributes.min_price = minPriceNum;
+        finalDynamicAttributes.max_price = maxPriceNum;
+        finalDynamicAttributes.price_range = `₹${minPriceNum} - ₹${maxPriceNum}`;
+        finalDynamicAttributes.minPrice = minPriceNum;
+        finalDynamicAttributes.maxPrice = maxPriceNum;
+      }
 
       if (Object.keys(finalDynamicAttributes).length > 0) {
         payload.dynamicAttributes = finalDynamicAttributes;
@@ -3721,9 +3826,21 @@ function ProductPage({ token, adminUserId }) {
           ) : null}
           {resolvedEditorTab === 'pricing' ? (
             <>
-              <p className="pcc-section-label">Base Pricing</p>
+              <p className="pcc-section-label">Base Pricing & Selling Model</p>
               <div className="pcc-fgrid">
-                <ProductEditorField label="Selling Price (Rs)" required>
+                <ProductEditorField label="Selling Model">
+                  <select value={form.sellingModel} onChange={(event) => handleChange('sellingModel', event.target.value)}>
+                    <option value="FIXED_PRICE">Fixed price</option>
+                    <option value="PRICE_RANGE">Price range</option>
+                    <option value="BULK_PRICE">Bulk price</option>
+                    <option value="DAILY_MARKET_PRICE">Daily market price</option>
+                    <option value="ASK_FOR_PRICE">Ask for price</option>
+                  </select>
+                </ProductEditorField>
+                <ProductEditorField
+                  label={form.sellingModel === 'PRICE_RANGE' ? "Min Price (Rs)" : "Selling Price (Rs)"}
+                  required
+                >
                   <input
                     type="number"
                     value={form.sellingPrice}
@@ -3733,7 +3850,23 @@ function ProductPage({ token, adminUserId }) {
                     step="0.01"
                   />
                 </ProductEditorField>
-                <ProductEditorField label="MRP (Rs)" required>
+                {form.sellingModel === 'PRICE_RANGE' ? (
+                  <ProductEditorField label="Max Price (Rs)" required>
+                    <input
+                      type="number"
+                      value={form.maxPrice}
+                      onChange={(event) => handleChange('maxPrice', event.target.value)}
+                      placeholder="0.00"
+                      min="0"
+                      step="0.01"
+                    />
+                  </ProductEditorField>
+                ) : null}
+                <ProductEditorField
+                  label="MRP (Rs)"
+                  required={form.sellingModel !== 'PRICE_RANGE'}
+                  hint={form.sellingModel === 'PRICE_RANGE' ? 'Optional (defaults to Max Price)' : undefined}
+                >
                   <input
                     type="number"
                     value={form.mrp}
@@ -4524,8 +4657,17 @@ function ProductPage({ token, adminUserId }) {
     { label: 'Attributes', value: formatValue(selectedProduct?.attributes), spanFull: true },
     { label: 'Specifications', value: formatValue(selectedProduct?.specifications), spanFull: true },
   ];
+  const selectedPriceInfo = getProductPriceRangeInfo(selectedProduct);
   const pricingViewFields = [
-    { label: 'Selling Price', value: formatPrice(selectedProduct?.sellingPrice, selectedProduct?.currency) },
+    ...(selectedPriceInfo.isRange
+      ? [
+          { label: 'Price Range', value: selectedPriceInfo.formatted || '-' },
+          { label: 'Min Price', value: selectedPriceInfo.minPrice !== null && selectedPriceInfo.minPrice !== undefined ? formatPrice(selectedPriceInfo.minPrice, selectedProduct?.currency) : '-' },
+          { label: 'Max Price', value: selectedPriceInfo.maxPrice !== null && selectedPriceInfo.maxPrice !== undefined ? formatPrice(selectedPriceInfo.maxPrice, selectedProduct?.currency) : '-' },
+        ]
+      : [
+          { label: 'Selling Price', value: formatPrice(selectedProduct?.sellingPrice, selectedProduct?.currency) },
+        ]),
     { label: 'MRP', value: formatPrice(selectedProduct?.mrp, selectedProduct?.currency) },
     { label: 'GST Rate', value: formatValue(selectedProduct?.gstRate) },
     { label: 'Currency', value: formatValue(selectedProduct?.currency) },
@@ -4575,7 +4717,7 @@ function ProductPage({ token, adminUserId }) {
   ];
   const logisticsViewFields = [
     { label: 'Selling Style', value: formatValue(selectedProduct?.dynamicAttributes?.selling_style) },
-    { label: 'Selling Model', value: formatValue(selectedProduct?.dynamicAttributes?.selling_model) },
+    { label: 'Selling Model', value: formatValue(selectedProduct?.dynamicAttributes?.selling_model || (selectedPriceInfo.isRange ? 'PRICE_RANGE' : 'FIXED_PRICE')) },
     { label: 'Selling Unit', value: formatValue(selectedProduct?.dynamicAttributes?.selling_unit) },
     { label: 'Quantity Step', value: formatValue(selectedProduct?.dynamicAttributes?.quantity_step) },
     { label: 'Pack Quantity', value: formatValue(selectedProduct?.dynamicAttributes?.pack_quantity) },
@@ -5579,7 +5721,17 @@ function ProductPage({ token, adminUserId }) {
                   </div>
                   <div className="gsc-product-create-column">
                     <label className="field">
-                      <span>Selling price<span className="gsc-required">*</span></span>
+                      <span>Selling Model</span>
+                      <select value={form.sellingModel} onChange={(event) => handleChange('sellingModel', event.target.value)}>
+                        <option value="FIXED_PRICE">Fixed price</option>
+                        <option value="PRICE_RANGE">Price range</option>
+                        <option value="BULK_PRICE">Bulk price</option>
+                        <option value="DAILY_MARKET_PRICE">Daily market price</option>
+                        <option value="ASK_FOR_PRICE">Ask for price</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>{form.sellingModel === 'PRICE_RANGE' ? 'Min price' : 'Selling price'}<span className="gsc-required">*</span></span>
                       <input
                         type="number"
                         value={form.sellingPrice}
@@ -5588,14 +5740,26 @@ function ProductPage({ token, adminUserId }) {
                         required
                       />
                     </label>
+                    {form.sellingModel === 'PRICE_RANGE' ? (
+                      <label className="field">
+                        <span>Max price<span className="gsc-required">*</span></span>
+                        <input
+                          type="number"
+                          value={form.maxPrice}
+                          onChange={(event) => handleChange('maxPrice', event.target.value)}
+                          placeholder="0.00"
+                          required
+                        />
+                      </label>
+                    ) : null}
                     <label className="field">
-                      <span>MRP<span className="gsc-required">*</span></span>
+                      <span>MRP{form.sellingModel === 'PRICE_RANGE' ? ' (optional)' : <span className="gsc-required">*</span>}</span>
                       <input
                         type="number"
                         value={form.mrp}
                         onChange={(event) => handleChange('mrp', event.target.value)}
                         placeholder="0.00"
-                        required
+                        required={form.sellingModel !== 'PRICE_RANGE'}
                       />
                     </label>
                     <label className="field">
@@ -5926,10 +6090,20 @@ function ProductPage({ token, adminUserId }) {
               </div>
               <div className="gsc-tab-section gsc-tab-pricing">
               <div className="field-span section-heading">
-                <h4 className="panel-subheading">Pricing</h4>
+                <h4 className="panel-subheading">Pricing & Selling Model</h4>
               </div>
               <label className="field">
-                <span>Selling price<span className="gsc-required">*</span></span>
+                <span>Selling Model</span>
+                <select value={form.sellingModel} onChange={(event) => handleChange('sellingModel', event.target.value)}>
+                  <option value="FIXED_PRICE">Fixed price</option>
+                  <option value="PRICE_RANGE">Price range</option>
+                  <option value="BULK_PRICE">Bulk price</option>
+                  <option value="DAILY_MARKET_PRICE">Daily market price</option>
+                  <option value="ASK_FOR_PRICE">Ask for price</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>{form.sellingModel === 'PRICE_RANGE' ? 'Min price' : 'Selling price'}<span className="gsc-required">*</span></span>
                 <input
                   type="number"
                   value={form.sellingPrice}
@@ -5938,14 +6112,26 @@ function ProductPage({ token, adminUserId }) {
                   required
                 />
               </label>
+              {form.sellingModel === 'PRICE_RANGE' ? (
+                <label className="field">
+                  <span>Max price<span className="gsc-required">*</span></span>
+                  <input
+                    type="number"
+                    value={form.maxPrice}
+                    onChange={(event) => handleChange('maxPrice', event.target.value)}
+                    placeholder="0.00"
+                    required
+                  />
+                </label>
+              ) : null}
               <label className="field">
-                <span>MRP<span className="gsc-required">*</span></span>
+                <span>MRP{form.sellingModel === 'PRICE_RANGE' ? ' (optional)' : <span className="gsc-required">*</span>}</span>
                 <input
                   type="number"
                   value={form.mrp}
                   onChange={(event) => handleChange('mrp', event.target.value)}
                   placeholder="0.00"
-                  required
+                  required={form.sellingModel !== 'PRICE_RANGE'}
                 />
               </label>
               <label className="field">
@@ -6622,7 +6808,13 @@ function ProductPage({ token, adminUserId }) {
                   </p>
                   <div className="pvr-kpi-strip">
                     {[
-                      { label: 'Selling Price', value: formatPrice(selectedProduct?.sellingPrice, selectedProduct?.currency) },
+                      (() => {
+                        const rangeInfo = getProductPriceRangeInfo(selectedProduct);
+                        if (rangeInfo.isRange) {
+                          return { label: 'Price Range', value: rangeInfo.formatted || '—' };
+                        }
+                        return { label: 'Selling Price', value: formatPrice(selectedProduct?.sellingPrice, selectedProduct?.currency) };
+                      })(),
                       { label: 'MRP',           value: formatPrice(selectedProduct?.mrp, selectedProduct?.currency) },
                       { label: 'GST Rate',      value: selectedProduct?.gstRate != null ? `${selectedProduct.gstRate}%` : '—' },
                       { label: 'Stock',         value: selectedProduct?.stockQuantity != null ? String(selectedProduct.stockQuantity) : '—' },
