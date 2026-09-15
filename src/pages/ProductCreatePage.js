@@ -36,7 +36,7 @@ const INITIAL_FORM = {
   attributes: '', specifications: '',
   videoLink: '', accountCode: '', licenseCertificateId: '', licenseDocumentsText: '', internalNotes: '',
   sku: '', stockQuantity: '',
-  sellingPrice: '', mrp: '', gstRate: '', minimumOrderQuantity: '',
+  sellingPrice: '', maxPrice: '', mrp: '', gstRate: '', minimumOrderQuantity: '',
   thumbnailImage: '', galleryImagesText: '',
   baseUomId: '', defaultStockInUomId: '', defaultStockOutUomId: '',
   sellingStyle: 'PIECE',
@@ -56,7 +56,7 @@ const FIELD_TAB_MAP = {
   userId: 'setup', mainCategoryId: 'setup', categoryId: 'setup', subCategoryId: 'setup',
   productName: 'details', brandName: 'details', shortDescription: 'details',
   longDescription: 'details', hsnCode: 'details', countryOfOrigin: 'details',
-  sellingPrice: 'details', mrp: 'details', gstRate: 'details', minimumOrderQuantity: 'details',
+  sellingPrice: 'details', maxPrice: 'details', mrp: 'details', gstRate: 'details', minimumOrderQuantity: 'details',
   thumbnailImage: 'media', galleryImagesText: 'media',
   baseUomId: 'variants', defaultStockInUomId: 'variants', defaultStockOutUomId: 'variants',
 };
@@ -96,6 +96,7 @@ const FORM_FIELD_TAB_MAP = {
   thumbnailImage: 'media',
   galleryImagesText: 'media',
   sellingPrice: 'pricing',
+  maxPrice: 'pricing',
   mrp: 'pricing',
   gstRate: 'pricing',
   minimumOrderQuantity: 'pricing',
@@ -164,27 +165,65 @@ function validateField(key, value, formState = {}) {
     case 'categoryId':     return !v ? 'Select a category.' : null;
     case 'productName':    return !v ? 'Product name is required.' : v.length < 2 ? 'Min 2 characters.' : null;
     case 'sellingPrice': {
-      if (!v) return 'Selling price is required.';
+      const isRange = formState.sellingModel === 'PRICE_RANGE';
+      if (!v) return isRange ? 'Min price is required.' : 'Selling price is required.';
       const sp = Number(v);
       if (isNaN(sp) || sp <= 0) return 'Enter a valid price.';
-      const mrpRaw = formState.mrp;
-      if (mrpRaw !== undefined && mrpRaw !== null && String(mrpRaw).trim() !== '') {
-        const mrp = Number(mrpRaw);
-        if (!isNaN(mrp) && mrp > 0 && sp > mrp) {
-          return 'Selling price cannot exceed MRP.';
+      if (isRange) {
+        const maxRaw = formState.maxPrice;
+        if (maxRaw !== undefined && maxRaw !== null && String(maxRaw).trim() !== '') {
+          const maxP = Number(maxRaw);
+          if (!isNaN(maxP) && maxP > 0) {
+            if (sp > maxP) return 'Min price cannot exceed Max price.';
+            if (sp === maxP) return 'Min and Max price cannot be equal.';
+          }
+        }
+      } else {
+        const mrpRaw = formState.mrp;
+        if (mrpRaw !== undefined && mrpRaw !== null && String(mrpRaw).trim() !== '') {
+          const mrp = Number(mrpRaw);
+          if (!isNaN(mrp) && mrp > 0 && sp > mrp) {
+            return 'Selling price cannot exceed MRP.';
+          }
+        }
+      }
+      return null;
+    }
+    case 'maxPrice': {
+      if (formState.sellingModel !== 'PRICE_RANGE') return null;
+      if (!v) return 'Max price is required.';
+      const maxP = Number(v);
+      if (isNaN(maxP) || maxP <= 0) return 'Enter a valid max price.';
+      const spRaw = formState.sellingPrice;
+      if (spRaw !== undefined && spRaw !== null && String(spRaw).trim() !== '') {
+        const sp = Number(spRaw);
+        if (!isNaN(sp) && sp > 0) {
+          if (maxP < sp) return 'Max price cannot be less than Min price.';
+          if (maxP === sp) return 'Max price must be greater than Min price.';
         }
       }
       return null;
     }
     case 'mrp': {
-      if (!v) return 'MRP is required.';
+      const isRange = formState.sellingModel === 'PRICE_RANGE';
+      if (!v) return isRange ? null : 'MRP is required.';
       const mrp = Number(v);
       if (isNaN(mrp) || mrp <= 0) return 'Enter a valid MRP.';
-      const spRaw = formState.sellingPrice;
-      if (spRaw !== undefined && spRaw !== null && String(spRaw).trim() !== '') {
-        const sp = Number(spRaw);
-        if (!isNaN(sp) && sp > 0 && sp > mrp) {
-          return 'MRP cannot be less than Selling Price.';
+      if (isRange) {
+        const maxRaw = formState.maxPrice || formState.sellingPrice;
+        if (maxRaw !== undefined && maxRaw !== null && String(maxRaw).trim() !== '') {
+          const maxP = Number(maxRaw);
+          if (!isNaN(maxP) && maxP > 0 && mrp < maxP) {
+            return 'MRP cannot be less than Max price.';
+          }
+        }
+      } else {
+        const spRaw = formState.sellingPrice;
+        if (spRaw !== undefined && spRaw !== null && String(spRaw).trim() !== '') {
+          const sp = Number(spRaw);
+          if (!isNaN(sp) && sp > 0 && sp > mrp) {
+            return 'MRP cannot be less than Selling Price.';
+          }
         }
       }
       return null;
@@ -446,24 +485,18 @@ function ProductCreatePage({ token }) {
 
     setTouched((prev) => {
       const nextTouched = { ...prev, [key]: true };
-      if (key === 'sellingPrice' || key === 'mrp') {
-        const otherKey = key === 'sellingPrice' ? 'mrp' : 'sellingPrice';
-        if (nextForm[otherKey] !== '' && nextForm[otherKey] !== undefined) {
-          nextTouched[otherKey] = true;
-        }
+      if (key === 'sellingPrice' || key === 'maxPrice' || key === 'mrp' || key === 'sellingModel') {
+        ['sellingPrice', 'maxPrice', 'mrp'].forEach((pk) => {
+          if (nextForm[pk] !== '' && nextForm[pk] !== undefined) {
+            nextTouched[pk] = true;
+          }
+        });
       }
       return nextTouched;
     });
 
     const err = validateField(key, value, nextForm);
-    let companionErr = undefined;
-    let companionKey = null;
-    if (key === 'sellingPrice' || key === 'mrp') {
-      companionKey = key === 'sellingPrice' ? 'mrp' : 'sellingPrice';
-      if (nextForm[companionKey] !== '' && nextForm[companionKey] !== undefined) {
-        companionErr = validateField(companionKey, nextForm[companionKey], nextForm) || undefined;
-      }
-    }
+    const isPriceRelated = key === 'sellingPrice' || key === 'maxPrice' || key === 'mrp' || key === 'sellingModel';
 
     setErrors((prev) => {
       const nextErrors = { ...prev };
@@ -472,12 +505,14 @@ function ProductCreatePage({ token }) {
       } else {
         delete nextErrors[key];
       }
-      if (companionKey) {
-        if (companionErr) {
-          nextErrors[companionKey] = companionErr;
-        } else {
-          delete nextErrors[companionKey];
-        }
+      if (isPriceRelated) {
+        ['sellingPrice', 'maxPrice', 'mrp'].forEach((pk) => {
+          if (pk !== key && nextForm[pk] !== '' && nextForm[pk] !== undefined) {
+            const pErr = validateField(pk, nextForm[pk], nextForm);
+            if (pErr) nextErrors[pk] = pErr;
+            else delete nextErrors[pk];
+          }
+        });
       }
       return nextErrors;
     });
@@ -487,24 +522,18 @@ function ProductCreatePage({ token }) {
     const currentForm = formRef.current;
     setTouched((prev) => {
       const nextTouched = { ...prev, [key]: true };
-      if (key === 'sellingPrice' || key === 'mrp') {
-        const otherKey = key === 'sellingPrice' ? 'mrp' : 'sellingPrice';
-        if (currentForm[otherKey] !== '' && currentForm[otherKey] !== undefined) {
-          nextTouched[otherKey] = true;
-        }
+      if (key === 'sellingPrice' || key === 'maxPrice' || key === 'mrp' || key === 'sellingModel') {
+        ['sellingPrice', 'maxPrice', 'mrp'].forEach((pk) => {
+          if (currentForm[pk] !== '' && currentForm[pk] !== undefined) {
+            nextTouched[pk] = true;
+          }
+        });
       }
       return nextTouched;
     });
 
     const err = validateField(key, currentForm[key], currentForm);
-    let companionErr = undefined;
-    let companionKey = null;
-    if (key === 'sellingPrice' || key === 'mrp') {
-      companionKey = key === 'sellingPrice' ? 'mrp' : 'sellingPrice';
-      if (currentForm[companionKey] !== '' && currentForm[companionKey] !== undefined) {
-        companionErr = validateField(companionKey, currentForm[companionKey], currentForm) || undefined;
-      }
-    }
+    const isPriceRelated = key === 'sellingPrice' || key === 'maxPrice' || key === 'mrp' || key === 'sellingModel';
 
     setErrors((prev) => {
       const nextErrors = { ...prev };
@@ -513,12 +542,14 @@ function ProductCreatePage({ token }) {
       } else {
         delete nextErrors[key];
       }
-      if (companionKey) {
-        if (companionErr) {
-          nextErrors[companionKey] = companionErr;
-        } else {
-          delete nextErrors[companionKey];
-        }
+      if (isPriceRelated) {
+        ['sellingPrice', 'maxPrice', 'mrp'].forEach((pk) => {
+          if (pk !== key && currentForm[pk] !== '' && currentForm[pk] !== undefined) {
+            const pErr = validateField(pk, currentForm[pk], currentForm);
+            if (pErr) nextErrors[pk] = pErr;
+            else delete nextErrors[pk];
+          }
+        });
       }
       return nextErrors;
     });
@@ -881,6 +912,24 @@ function ProductCreatePage({ token }) {
       if (form.deliveryAvailable !== undefined) dynamicAttributes.delivery_available = form.deliveryAvailable;
       if (form.pickupAvailable !== undefined) dynamicAttributes.pickup_available = form.pickupAvailable;
 
+      const isRange = form.sellingModel === 'PRICE_RANGE';
+      const minPriceNum = Number(form.sellingPrice);
+      const maxPriceNum = isRange && form.maxPrice ? Number(form.maxPrice) : null;
+      const finalMrp = isRange && maxPriceNum ? (form.mrp ? Number(form.mrp) : maxPriceNum) : Number(form.mrp);
+
+      if (isRange && maxPriceNum) {
+        dynamicAttributes._legacy = {
+          minPrice: minPriceNum,
+          maxPrice: maxPriceNum,
+          price_range: `₹${minPriceNum} - ₹${maxPriceNum}`,
+        };
+        dynamicAttributes.min_price = minPriceNum;
+        dynamicAttributes.max_price = maxPriceNum;
+        dynamicAttributes.price_range = `₹${minPriceNum} - ₹${maxPriceNum}`;
+        dynamicAttributes.minPrice = minPriceNum;
+        dynamicAttributes.maxPrice = maxPriceNum;
+      }
+
       const payload = {
         userId: Number(form.userId),
         productType: form.productType?.trim() || 'Physical',
@@ -903,8 +952,8 @@ function ProductCreatePage({ token }) {
         internalNotes: form.internalNotes.trim() || null,
         mainCategoryId: Number(form.mainCategoryId),
         categoryId: Number(form.categoryId),
-        sellingPrice: Number(form.sellingPrice),
-        mrp: Number(form.mrp),
+        sellingPrice: minPriceNum,
+        mrp: finalMrp,
         gstRate: Number(form.gstRate),
         minimumOrderQuantity: form.minimumOrderQuantity ? Number(form.minimumOrderQuantity) : null,
         sku: form.sku.trim() || null,
@@ -1267,12 +1316,42 @@ function ProductCreatePage({ token }) {
           {/* ── Pricing Details ─────────────────────────────── */}
           {activeTab === 'pricing' ? (
             <>
-              <p className="pcc-section-label">Base Pricing</p>
+              <p className="pcc-section-label">Base Pricing & Selling Model</p>
               <div className="pcc-fgrid">
-                <Field label="Selling Price (Rs)" required error={errors.sellingPrice} touched={touched.sellingPrice}>
+                <Field label="Selling Model">
+                  <select {...inp('sellingModel')}>
+                    <option value="FIXED_PRICE">Fixed price</option>
+                    <option value="PRICE_RANGE">Price range</option>
+                    <option value="BULK_PRICE">Bulk price</option>
+                    <option value="DAILY_MARKET_PRICE">Daily market price</option>
+                    <option value="ASK_FOR_PRICE">Ask for price</option>
+                  </select>
+                </Field>
+                <Field
+                  label={form.sellingModel === 'PRICE_RANGE' ? "Min Price (Rs)" : "Selling Price (Rs)"}
+                  required
+                  error={errors.sellingPrice}
+                  touched={touched.sellingPrice}
+                >
                   <input type="number" placeholder="0.00" min="0" step="0.01" {...inp('sellingPrice')} />
                 </Field>
-                <Field label="MRP (Rs)" required error={errors.mrp} touched={touched.mrp}>
+                {form.sellingModel === 'PRICE_RANGE' ? (
+                  <Field
+                    label="Max Price (Rs)"
+                    required
+                    error={errors.maxPrice}
+                    touched={touched.maxPrice}
+                  >
+                    <input type="number" placeholder="0.00" min="0" step="0.01" {...inp('maxPrice')} />
+                  </Field>
+                ) : null}
+                <Field
+                  label="MRP (Rs)"
+                  required={form.sellingModel !== 'PRICE_RANGE'}
+                  error={errors.mrp}
+                  touched={touched.mrp}
+                  hint={form.sellingModel === 'PRICE_RANGE' ? 'Optional (defaults to Max Price)' : undefined}
+                >
                   <input type="number" placeholder="0.00" min="0" step="0.01" {...inp('mrp')} />
                 </Field>
                 <Field label="GST Rate (%)" required error={errors.gstRate} touched={touched.gstRate}>

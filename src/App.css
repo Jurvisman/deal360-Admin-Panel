@@ -18958,6 +18958,47 @@ textarea {
   color: var(--admin-muted, #9ca3af);
 }
 
+.gallery-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.gallery-thumb {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+.gallery-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gallery-remove-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gallery-add-btn {
+  width: 84px;
+  height: 84px;
+  border-radius: 8px;
+  border: 1px dashed #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
 /* Inputs that use .bc-input class via Field children */
 .bc-field input, .bc-field select, .bc-field textarea {
   width: 100%;

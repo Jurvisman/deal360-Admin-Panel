@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Banner } from '../components';
-import { fetchBusinessDetails, listBusinessTypes, listIndustries, updateBusinessProfile } from '../services/adminApi';
+import { fetchBusinessDetails, listBusinessTypes, listIndustries, updateBusinessProfile, uploadBannerImages } from '../services/adminApi';
 
 const getUserName = (user) =>
   user?.name || user?.full_name || user?.fullName || user?.username || user?.mobile || `Business #${user?.id || ''}`;
@@ -34,7 +34,8 @@ const BUSINESS_PROFILE_FIELDS = [
   { key: 'industry',            label: 'Industry',               type: 'industry',    required: true },
   { key: 'businessSegment',     label: 'Business Segment',       type: 'segment',     required: true },
   { key: 'businessType',        label: 'Business Type',          type: 'businessType', required: true },
-  { key: 'gstNumber',           label: 'GST Number',             required: true },
+  { key: 'gstChoice',           label: 'Does the business have GST?', type: 'gstChoice', required: true },
+  { key: 'gstNumber',           label: 'GST Number' },
   { key: 'businessPan',         label: 'Business PAN',           required: true },
   { key: 'aadhaar',             label: 'Aadhaar Number' },
   { key: 'udyam',               label: 'Udyam Registration' },
@@ -59,6 +60,7 @@ const BUSINESS_PROFILE_FIELDS = [
   { key: 'latitude',            label: 'Latitude',               type: 'number' },
   { key: 'longitude',           label: 'Longitude',              type: 'number' },
   { key: 'logo',                label: 'Logo URL' },
+  { key: 'galleryImages',       label: 'Gallery Photos',         type: 'gallery', span: true },
   { key: 'website',             label: 'Website',                type: 'url' },
   { key: 'branchAddress',       label: 'Branch Address',         type: 'textarea', span: true },
   { key: 'description',         label: 'Description',            type: 'textarea', span: true },
@@ -77,9 +79,9 @@ const BUSINESS_PROFILE_FIELDS = [
 const getEditTabForField = (key) => {
   const generalKeys = new Set([
     'businessName', 'ownerName', 'contactNumber', 'whatsappNumber', 'email',
-    'industry', 'businessSegment', 'businessType', 'gstNumber', 'businessPan', 'aadhaar', 'udyam',
+    'industry', 'businessSegment', 'businessType', 'gstChoice', 'gstNumber', 'businessPan', 'aadhaar', 'udyam',
     'nature', 'experience', 'hours', 'serviceArea', 'serviceRadius', 'modeOfService',
-    'languagesSupported', 'logo', 'website', 'licenseNumber', 'description',
+    'languagesSupported', 'logo', 'galleryImages', 'website', 'licenseNumber', 'description',
     'primaryCategoryId', 'primarySubCategoryId',
   ]);
   const addressKeys = new Set([
@@ -142,10 +144,22 @@ const validateBusinessForm = (form) => {
   if (form.whatsappNumber?.trim() && !PHONE_RE.test(form.whatsappNumber.trim())) {
     errors.whatsappNumber = 'Enter a valid 10-digit Indian mobile number.';
   }
-  if (!form.gstNumber?.trim()) {
-    errors.gstNumber = 'GST number is required.';
-  } else if (!GST_RE.test(form.gstNumber.trim().toUpperCase())) {
-    errors.gstNumber = 'Invalid GST. Example: 22AAAAA0000A1Z5';
+  if (!form.gstChoice?.trim()) {
+    errors.gstChoice = 'Select whether the business has GST.';
+  }
+  if (form.gstChoice === 'GST') {
+    if (!form.gstNumber?.trim()) {
+      errors.gstNumber = 'GST number is required.';
+    } else if (!GST_RE.test(form.gstNumber.trim().toUpperCase())) {
+      errors.gstNumber = 'Invalid GST. Example: 22AAAAA0000A1Z5';
+    }
+  }
+  if (form.gstChoice === 'NON_GST') {
+    if (!form.aadhaar?.trim()) {
+      errors.aadhaar = 'Aadhaar number is required.';
+    } else if (!/^[0-9]{12}$/.test(form.aadhaar.trim().replace(/\D/g, ''))) {
+      errors.aadhaar = 'Enter a valid 12-digit Aadhaar number.';
+    }
   }
 
   if (!form.businessPan?.trim()) {
@@ -184,15 +198,25 @@ const validateBusinessForm = (form) => {
 };
 
 /* ── Form mapping ───────────────────────────────────────────── */
-const buildBusinessFormState = (profile) =>
-  BUSINESS_PROFILE_FIELDS.reduce((acc, field) => {
+const buildBusinessFormState = (profile) => {
+  const state = BUSINESS_PROFILE_FIELDS.reduce((acc, field) => {
     const value = profile?.[field.key];
     acc[field.key] = value !== null && value !== undefined ? value : '';
     return acc;
   }, {});
+  // Older profiles saved before gstChoice existed don't have it set — infer it from
+  // whichever of GST number / Aadhaar is actually on file, so editing one doesn't
+  // suddenly demand the other be filled in too.
+  if (!state.gstChoice) {
+    if (state.gstNumber) state.gstChoice = 'GST';
+    else if (state.aadhaar) state.gstChoice = 'NON_GST';
+  }
+  state.galleryImages = Array.isArray(profile?.galleryImages) ? profile.galleryImages : [];
+  return state;
+};
 
-const buildBusinessPayload = (form) =>
-  BUSINESS_PROFILE_FIELDS.reduce((acc, field) => {
+const buildBusinessPayload = (form) => {
+  const payload = BUSINESS_PROFILE_FIELDS.reduce((acc, field) => {
     const value = form?.[field.key];
     if (value === null || value === undefined || value === '') {
       acc[field.key] = null;
@@ -206,6 +230,12 @@ const buildBusinessPayload = (form) =>
     acc[field.key] = typeof value === 'string' ? value.trim() : value;
     return acc;
   }, {});
+  // Only the chosen KYC path's identifier should be saved — clear whichever one the
+  // gstChoice toggle says doesn't apply, instead of persisting stale leftover data.
+  if (form.gstChoice === 'GST') payload.aadhaar = null;
+  if (form.gstChoice === 'NON_GST') payload.gstNumber = null;
+  return payload;
+};
 
 /* ── Select field renderer ─────────────────────────────────────── */
 function SelectField({ value, onChange, options, placeholder, disabled, ...props }) {
@@ -242,6 +272,14 @@ function BusinessProfileEditPage({ token }) {
   const [industries, setIndustries]   = useState([]);
   const [businessTypes, setBusinessTypes] = useState([]);
   const [customHours, setCustomHours] = useState(false);
+
+  // Logo upload
+  const logoInputRef = useRef(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+
+  // Gallery photos upload
+  const galleryInputRef = useRef(null);
+  const [isUploadingGallery, setIsUploadingGallery] = useState(false);
 
   /* ── Load industries on mount ──────────────────────────────── */
   useEffect(() => {
@@ -313,6 +351,58 @@ function BusinessProfileEditPage({ token }) {
     }
   };
 
+  const openLogoUpload = () => {
+    if (logoInputRef.current) {
+      logoInputRef.current.value = '';
+      logoInputRef.current.click();
+    }
+  };
+
+  const handleLogoFile = async (event) => {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    setIsUploadingLogo(true);
+    setMessage({ type: 'info', text: '' });
+    try {
+      const response = await uploadBannerImages(token, [file]);
+      const url = response?.data?.urls?.[0];
+      if (!url) throw new Error('Upload failed. No file URL returned.');
+      handleChange('logo', url);
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Failed to upload logo.' });
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
+  const openGalleryUpload = () => {
+    if (galleryInputRef.current) {
+      galleryInputRef.current.value = '';
+      galleryInputRef.current.click();
+    }
+  };
+
+  const handleGalleryFiles = async (event) => {
+    const files = Array.from(event?.target?.files || []);
+    if (!files.length) return;
+    setIsUploadingGallery(true);
+    setMessage({ type: 'info', text: '' });
+    try {
+      const response = await uploadBannerImages(token, files);
+      const urls = Array.isArray(response?.data?.urls) ? response.data.urls : [];
+      if (!urls.length) throw new Error('Upload failed. No file URLs returned.');
+      setForm((prev) => ({ ...prev, galleryImages: [...(prev.galleryImages || []), ...urls] }));
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Failed to upload photos.' });
+    } finally {
+      setIsUploadingGallery(false);
+    }
+  };
+
+  const removeGalleryImage = (url) => {
+    setForm((prev) => ({ ...prev, galleryImages: (prev.galleryImages || []).filter((u) => u !== url) }));
+  };
+
   const handleHoursPreset = (val) => {
     if (val === '__custom__') {
       setCustomHours(true);
@@ -367,6 +457,9 @@ function BusinessProfileEditPage({ token }) {
 
   /* ── Render a single field ─────────────────────────────────── */
   const renderField = (field) => {
+    if (field.key === 'gstNumber' && form.gstChoice !== 'GST') return null;
+    if (field.key === 'aadhaar' && form.gstChoice !== 'NON_GST') return null;
+
     const value = form?.[field.key] ?? '';
     const error = formErrors[field.key];
     const isTouched = touched[field.key];
@@ -434,6 +527,19 @@ function BusinessProfileEditPage({ token }) {
           onBlur={() => handleBlur(field.key)}
         />
       );
+    } else if (fieldType === 'gstChoice') {
+      input = (
+        <SelectField
+          value={value}
+          onChange={(v) => handleChange(field.key, v)}
+          options={[
+            { value: 'GST', label: 'Yes, has GST' },
+            { value: 'NON_GST', label: 'No GST' },
+          ]}
+          placeholder="— Select —"
+          onBlur={() => handleBlur(field.key)}
+        />
+      );
     } else if (fieldType === 'nature') {
       input = (
         <SelectField
@@ -492,6 +598,51 @@ function BusinessProfileEditPage({ token }) {
           required={Boolean(field.required)}
           {...commonProps}
         />
+      );
+    } else if (field.key === 'logo') {
+      input = (
+        <>
+          <input
+            type="text"
+            placeholder="https://... (or upload a file)"
+            value={value}
+            onChange={(e) => handleChange(field.key, e.target.value)}
+            {...commonProps}
+          />
+          <div className="bc-doc-upload-row" style={{ marginTop: 8 }}>
+            <button type="button" className="ghost-btn small" onClick={openLogoUpload} disabled={isUploadingLogo}>
+              {isUploadingLogo ? 'Uploading…' : value ? 'Replace logo' : 'Upload logo'}
+            </button>
+            {value ? (
+              <a href={value} target="_blank" rel="noreferrer" className="bc-doc-uploaded">✓ view</a>
+            ) : (
+              <span className="bc-hint">No logo uploaded yet</span>
+            )}
+          </div>
+        </>
+      );
+    } else if (fieldType === 'gallery') {
+      const images = Array.isArray(value) ? value : [];
+      input = (
+        <>
+          <div className="gallery-grid">
+            {images.map((url) => (
+              <div key={url} className="gallery-thumb">
+                <img src={url} alt="Business" />
+                <button type="button" className="gallery-remove-btn" onClick={() => removeGalleryImage(url)}>✕</button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="ghost-btn small gallery-add-btn"
+              onClick={openGalleryUpload}
+              disabled={isUploadingGallery}
+            >
+              {isUploadingGallery ? 'Uploading…' : '+ Add Photos'}
+            </button>
+          </div>
+          {images.length === 0 ? <span className="bc-hint">No gallery photos yet</span> : null}
+        </>
       );
     } else {
       // text, email, tel, url
@@ -559,6 +710,21 @@ function BusinessProfileEditPage({ token }) {
             </div>
 
             <form id="business-edit-form" className="field-grid business-profile-edit-grid" onSubmit={saveProfile}>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleLogoFile}
+                style={{ display: 'none' }}
+              />
+              <input
+                ref={galleryInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleGalleryFiles}
+                style={{ display: 'none' }}
+              />
               {BUSINESS_PROFILE_FIELDS
                 .filter((field) => getEditTabForField(field.key) === activeTab)
                 .map((field) => renderField(field))}
