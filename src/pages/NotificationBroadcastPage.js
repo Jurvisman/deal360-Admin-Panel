@@ -90,6 +90,8 @@ const extractLinkResults = (response) => {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.content)) return data.content;
   if (Array.isArray(data?.businesses)) return data.businesses;
+  if (Array.isArray(data?.products)) return data.products;
+  if (Array.isArray(data?.services)) return data.services;
   return [];
 };
 
