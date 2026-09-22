@@ -196,6 +196,7 @@ export const listProducts = (token, filters = {}) => {
 };
 export const listProductsByUser = (token, userId) => request(`/admin/product/by-user?userId=${userId}`, { token });
 export const listProductsByBusinessUser = (token, userId) => request(`/admin/businesses/${userId}/products`, { token });
+export const listServicesByBusinessUser = (token, userId) => request(`/admin/businesses/${userId}/services`, { token });
 export const getBusinessLeadSummary = (token, userId) => request(`/admin/businesses/${userId}/leads`, { token });
 export const getBusinessOrderSummary = (token, userId) => request(`/admin/businesses/${userId}/orders`, { token });
 export const getBusinessPaymentSummary = (token, userId) => request(`/admin/businesses/${userId}/payments`, { token });
@@ -758,4 +759,58 @@ export const updateSupportTicketStatus = (token, id, payload) =>
 // ── Dashboard Overview Tracking ──────────────────────────────
 export const getDashboardOverview = (token) =>
   request('/admin/dashboard/overview', { token });
+
+// ── Admin Notification Broadcasts ──────────────────────────────
+export const uploadBroadcastBanner = async (token, file) => {
+  const headers = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const body = new FormData();
+  body.append('file', file);
+
+  const response = await fetch(buildUrl('/admin/notification-broadcasts/upload-banner'), {
+    method: 'POST',
+    headers,
+    body,
+  });
+
+  if (!response.ok) {
+    const err = new Error(await parseError(response));
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+};
+
+export const createNotificationBroadcastDraft = (token, payload) =>
+  request('/admin/notification-broadcasts/draft', { method: 'POST', body: payload, token });
+
+export const updateNotificationBroadcastDraft = (token, id, payload) =>
+  request(`/admin/notification-broadcasts/${id}`, { method: 'PUT', body: payload, token });
+
+export const estimateNotificationBroadcastAudience = (token, id) =>
+  request(`/admin/notification-broadcasts/${id}/estimate-audience`, { method: 'POST', token });
+
+export const sendNotificationBroadcast = (token, id, scheduledAt = null) =>
+  request(`/admin/notification-broadcasts/${id}/schedule`, {
+    method: 'POST',
+    body: scheduledAt ? { scheduledAt } : {},
+    token,
+  });
+
+export const cancelNotificationBroadcast = (token, id) =>
+  request(`/admin/notification-broadcasts/${id}/cancel`, { method: 'POST', token });
+
+export const listNotificationBroadcasts = (token, status = null) =>
+  request(`/admin/notification-broadcasts${status ? `?status=${status}` : ''}`, { token });
+
+export const searchBusinessesForLink = (token, query) =>
+  fetchBusinesses(token, { search: query, page: 0, size: 10 });
+
+export const searchProductsForLink = (token, query) =>
+  listProducts(token, { query, page: 0, size: 10 });
+
+export const searchServicesForLink = (token, query) =>
+  listServices(token, { query, page: 0, size: 10 });
 
