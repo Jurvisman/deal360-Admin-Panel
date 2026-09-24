@@ -4,6 +4,7 @@ import {
   cancelNotificationBroadcast,
   createNotificationBroadcastDraft,
   estimateNotificationBroadcastAudience,
+  listIndustries,
   listNotificationBroadcasts,
   searchBusinessesForLink,
   searchProductsForLink,
@@ -77,7 +78,10 @@ const EMPTY_FORM = {
   ctaTargetType: 'NONE',
   ctaTargetId: null,
   ctaTargetLabel: '',
+  ctaTargetValue: '',
 };
+
+const ID_BASED_CTA_TYPES = new Set(['BUSINESS', 'PRODUCT', 'SERVICE', 'INDUSTRY']);
 
 const LINK_SEARCHERS = {
   BUSINESS: { fn: searchBusinessesForLink, idKey: 'id', labelKey: 'businessName', placeholder: 'Search business by name…' },
@@ -118,14 +122,24 @@ function NotificationBroadcastPage({ token }) {
   const [showLinkResults, setShowLinkResults] = useState(false);
   const linkSearchDebounceRef = useRef(null);
 
+  const [industries, setIndustries] = useState([]);
+  const [isLoadingIndustries, setIsLoadingIndustries] = useState(false);
+
   const parseList = (text) =>
     text.split(',').map((v) => v.trim()).filter(Boolean);
 
   const handleLinkTypeChange = (type) => {
-    setForm((prev) => ({ ...prev, ctaTargetType: type, ctaTargetId: null, ctaTargetLabel: '' }));
+    setForm((prev) => ({ ...prev, ctaTargetType: type, ctaTargetId: null, ctaTargetLabel: '', ctaTargetValue: '' }));
     setLinkQuery('');
     setLinkResults([]);
     setShowLinkResults(false);
+    if (type === 'INDUSTRY' && industries.length === 0 && !isLoadingIndustries) {
+      setIsLoadingIndustries(true);
+      listIndustries(token)
+        .then((list) => setIndustries(Array.isArray(list) ? list : list?.data || []))
+        .catch((error) => setMessage({ type: 'error', text: error.message || 'Failed to load industries.' }))
+        .finally(() => setIsLoadingIndustries(false));
+    }
   };
 
   // Live, debounced search-as-you-type — no separate "Search" button.
@@ -222,8 +236,12 @@ function NotificationBroadcastPage({ token }) {
       setMessage({ type: 'error', text: 'Enter at least one state or city for location targeting.' });
       return null;
     }
-    if (form.ctaTargetType !== 'NONE' && !form.ctaTargetId) {
-      setMessage({ type: 'error', text: 'Search and pick a business/product/service to link to, or set "Link to" back to None.' });
+    if (ID_BASED_CTA_TYPES.has(form.ctaTargetType) && !form.ctaTargetId) {
+      setMessage({ type: 'error', text: 'Search and pick something to link to, or set "Link to" back to None.' });
+      return null;
+    }
+    if (form.ctaTargetType === 'WEBSITE' && !form.ctaTargetValue.trim()) {
+      setMessage({ type: 'error', text: 'Enter a website URL to link to.' });
       return null;
     }
     setIsSaving(true);
@@ -237,7 +255,8 @@ function NotificationBroadcastPage({ token }) {
         states: form.audienceType === 'LOCATION' ? parseList(form.statesText) : [],
         cities: form.audienceType === 'LOCATION' ? parseList(form.citiesText) : [],
         ctaTargetType: form.ctaTargetType,
-        ctaTargetId: form.ctaTargetType !== 'NONE' ? form.ctaTargetId : null,
+        ctaTargetId: ID_BASED_CTA_TYPES.has(form.ctaTargetType) ? form.ctaTargetId : null,
+        ctaTargetValue: form.ctaTargetType === 'WEBSITE' ? form.ctaTargetValue.trim() : null,
       };
       const response = form.id
         ? await updateNotificationBroadcastDraft(token, form.id, payload)
@@ -326,10 +345,12 @@ function NotificationBroadcastPage({ token }) {
       {
         key: 'ctaTargetType',
         header: 'Links to',
-        render: (_, row) =>
-          row.ctaTargetType && row.ctaTargetType !== 'NONE'
-            ? `${row.ctaTargetType} #${row.ctaTargetId}`
-            : '—',
+        render: (_, row) => {
+          if (!row.ctaTargetType || row.ctaTargetType === 'NONE') return '—';
+          if (row.ctaTargetType === 'HOME') return 'Home Screen';
+          if (row.ctaTargetType === 'WEBSITE') return row.ctaTargetValue || 'Website';
+          return `${row.ctaTargetType} #${row.ctaTargetId}`;
+        },
       },
       { key: 'estimatedReach', header: 'Reach', render: (v) => (v ?? '—') },
       { key: 'sentCount', header: 'Sent', render: (v) => (v ?? '—') },
@@ -456,10 +477,48 @@ function NotificationBroadcastPage({ token }) {
                 <option value="BUSINESS">A Business</option>
                 <option value="PRODUCT">A Product</option>
                 <option value="SERVICE">A Service</option>
+                <option value="INDUSTRY">An Industry</option>
+                <option value="WEBSITE">A Website</option>
+                <option value="HOME">Home Screen</option>
               </select>
             </label>
 
-            {form.ctaTargetType !== 'NONE' && (
+            {form.ctaTargetType === 'WEBSITE' && (
+              <label className="field field-span">
+                <span>Website URL</span>
+                <input
+                  type="url"
+                  value={form.ctaTargetValue}
+                  onChange={(e) => setForm((prev) => ({ ...prev, ctaTargetValue: e.target.value }))}
+                  placeholder="https://example.com"
+                />
+              </label>
+            )}
+
+            {form.ctaTargetType === 'INDUSTRY' && (
+              <label className="field field-span">
+                <span>Industry</span>
+                <select
+                  value={form.ctaTargetId || ''}
+                  onChange={(e) => {
+                    const industry = industries.find((i) => String(i.id) === e.target.value);
+                    setForm((prev) => ({
+                      ...prev,
+                      ctaTargetId: e.target.value ? Number(e.target.value) : null,
+                      ctaTargetLabel: industry?.name || '',
+                    }));
+                  }}
+                  disabled={isLoadingIndustries}
+                >
+                  <option value="">{isLoadingIndustries ? 'Loading…' : 'Select an industry'}</option>
+                  {industries.map((industry) => (
+                    <option key={industry.id} value={industry.id}>{industry.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {LINK_SEARCHERS[form.ctaTargetType] && (
               <label className="field field-span">
                 <span>Search {form.ctaTargetType.toLowerCase()} to link</span>
                 <div className="notif-link-combobox">
