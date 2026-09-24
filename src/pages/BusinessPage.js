@@ -7,6 +7,7 @@ import {
   createUserAccount,
   deleteUsersBulk,
   activateBusinessSubscription,
+  assignSubscriptionPlan,
   fetchBusinessDetails,
   fetchBusinesses,
   getAddonHistory,
@@ -16,8 +17,10 @@ import {
   getBusinessPaymentSummary,
   getUserBusinessScore,
   listProductsByBusinessUser,
+  listServicesByBusinessUser,
   listRoles,
   listSubscriptionAssignments,
+  listSubscriptionPlans,
   updateBusinessProfile,
   updateBusinessProfileStatus,
   updateBusinessAccount,
@@ -392,6 +395,7 @@ function BusinessPage({ token, allowedActions }) {
   const [activeDetailGroup, setActiveDetailGroup] = useState('profile');
   const [isViewLoading, setIsViewLoading] = useState(false);
   const [viewProducts, setViewProducts] = useState([]);
+  const [viewServices, setViewServices] = useState([]);
   const [activeUserId, setActiveUserId] = useState(null);
   const [openActionRowId, setOpenActionRowId] = useState(null);
   const [editBusinessProfile, setEditBusinessProfile] = useState(null);
@@ -424,6 +428,12 @@ function BusinessPage({ token, allowedActions }) {
   const [activationTarget, setActivationTarget] = useState(null);
   const [activationNote, setActivationNote] = useState('');
   const [isActivatingSubscription, setIsActivatingSubscription] = useState(false);
+  const [reassignTarget, setReassignTarget] = useState(null);
+  const [reassignPlans, setReassignPlans] = useState([]);
+  const [reassignPlanId, setReassignPlanId] = useState('');
+  const [reassignDurationMonths, setReassignDurationMonths] = useState('1');
+  const [isReassigningSubscription, setIsReassigningSubscription] = useState(false);
+  const [showSubscriptionHistory, setShowSubscriptionHistory] = useState(false);
 
   // Create business modal
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -577,6 +587,7 @@ function BusinessPage({ token, allowedActions }) {
   const canEditKyc = !hasActionModel || allowedActionSet.has(BUSINESS_PERMISSIONS.kycUpdate);
   const canApprove = !hasActionModel || allowedActionSet.has(BUSINESS_PERMISSIONS.approve);
   const canActivateSubscription = !hasActionModel || allowedActionSet.has(SUBSCRIPTION_PERMISSIONS.activate);
+  const canReassignSubscription = !hasActionModel || allowedActionSet.has(SUBSCRIPTION_PERMISSIONS.reassign);
   const canViewReviewModeration = hasPermission(REVIEW_MODERATION_PERMISSIONS.read);
 
   const [totalBusinessCount, setTotalBusinessCount] = useState(0);
@@ -622,15 +633,20 @@ function BusinessPage({ token, allowedActions }) {
     setIsViewLoading(true);
     setMessage({ type: 'info', text: '' });
     try {
-      const [detailsResponse, productsResponse] = await Promise.all([
+      const [detailsResponse, productsResponse, servicesResponse] = await Promise.all([
         fetchBusinessDetails(token, userId),
         listProductsByBusinessUser(token, userId),
+        listServicesByBusinessUser(token, userId),
       ]);
       setViewDetails(detailsResponse?.data || null);
       const productsList = Array.isArray(productsResponse?.data?.products)
         ? productsResponse.data.products
         : Array.isArray(productsResponse?.data) ? productsResponse.data : [];
       setViewProducts(productsList);
+      const servicesList = Array.isArray(servicesResponse?.data?.services)
+        ? servicesResponse.data.services
+        : Array.isArray(servicesResponse?.data) ? servicesResponse.data : [];
+      setViewServices(servicesList);
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Failed to load business details.' });
     } finally {
@@ -642,6 +658,8 @@ function BusinessPage({ token, allowedActions }) {
     if (!isDetailRoute) {
       setViewDetails(null);
       setViewProducts([]);
+      setViewServices([]);
+      setShowSubscriptionHistory(false);
       setActiveTab('personal');
       setActiveDetailGroup('profile');
       setViewSubscriptions([]);
@@ -1095,6 +1113,79 @@ function BusinessPage({ token, allowedActions }) {
     }
   };
 
+  const openReassignModal = async (subscription) => {
+    if (!canReassignSubscription) {
+      setMessage({ type: 'error', text: 'You do not have permission to change subscription plans.' });
+      return;
+    }
+    setReassignTarget(subscription || {});
+    setReassignPlanId('');
+    setReassignDurationMonths('1');
+    try {
+      const response = await listSubscriptionPlans(token);
+      setReassignPlans(response?.data?.plans || []);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Failed to load subscription plans.' });
+    }
+  };
+
+  const closeReassignModal = () => {
+    if (isReassigningSubscription) return;
+    setReassignTarget(null);
+    setReassignPlanId('');
+    setReassignDurationMonths('1');
+  };
+
+  const selectedReassignPlan = useMemo(
+    () => reassignPlans.find((plan) => String(plan.id) === String(reassignPlanId)),
+    [reassignPlans, reassignPlanId]
+  );
+  const reassignUsesDurationTiers = Boolean(selectedReassignPlan?.duration_pricing_enabled);
+
+  const reassignDurationOptions = useMemo(() => {
+    const plan = selectedReassignPlan;
+    const basePrice = Number(plan?.price) || 0;
+    const tierMeta = {
+      1: { discount: 0, bonus: 0 },
+      3: { discount: Number(plan?.duration_3m_discount_percent) || 0, bonus: Number(plan?.duration_3m_bonus_months) || 0 },
+      6: { discount: Number(plan?.duration_6m_discount_percent) || 0, bonus: Number(plan?.duration_6m_bonus_months) || 0 },
+      12: { discount: Number(plan?.duration_12m_discount_percent) || 0, bonus: Number(plan?.duration_12m_bonus_months) || 0 },
+    };
+    return [1, 3, 6, 12].map((months) => {
+      const { discount, bonus } = tierMeta[months];
+      const regularTotal = basePrice * months;
+      const finalAmount = regularTotal - (regularTotal * discount) / 100;
+      const activeMonths = months + bonus;
+      return { months, discount, bonus, finalAmount, activeMonths };
+    });
+  }, [selectedReassignPlan]);
+
+  const handleReassignSubscription = async () => {
+    const userId = viewUser?.id || viewUser?.user_id;
+    if (!userId || !reassignPlanId) return;
+    setIsReassigningSubscription(true);
+    setMessage({ type: 'info', text: '' });
+    try {
+      const payload = { user_id: userId, plan_id: Number(reassignPlanId) };
+      if (reassignUsesDurationTiers) {
+        payload.selected_duration_months = Number(reassignDurationMonths);
+      }
+      await assignSubscriptionPlan(token, payload);
+      setReassignTarget(null);
+      setReassignPlanId('');
+      setReassignDurationMonths('1');
+      await Promise.all([
+        loadBusinessDetails(userId),
+        loadViewTabData(userId),
+      ]);
+      setMessage({ type: 'success', text: 'Subscription plan reassigned successfully.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Failed to reassign subscription plan.' });
+    } finally {
+      setIsReassigningSubscription(false);
+    }
+  };
+
   const personalFields = useMemo(() => {
     const accountFields = [
       { key: 'account-name', label: 'Account Name', value: getUserName(viewUser) },
@@ -1268,6 +1359,7 @@ function BusinessPage({ token, allowedActions }) {
     { key: 'kycdocs', label: 'KYC Documents' },
     { key: 'media', label: 'Media' },
     { key: 'products', label: 'Products', count: viewProducts.length, badgeCount: productPendingCount, badgeTone: 'danger' },
+    { key: 'services', label: 'Services', count: viewServices.length },
     { key: 'subscription', label: 'Subscription', count: viewSubscriptions.length },
     { key: 'payments', label: 'Payments', count: viewPayments?.totalPayments || 0 },
     { key: 'leads', label: 'Leads', count: viewLeads?.totalLeads || 0 },
@@ -1279,6 +1371,7 @@ function BusinessPage({ token, allowedActions }) {
     viewOrders?.totalOrders,
     viewPayments?.totalPayments,
     viewProducts.length,
+    viewServices.length,
     viewSubscriptions.length,
   ]);
 
@@ -2351,6 +2444,53 @@ function BusinessPage({ token, allowedActions }) {
                     </div>
                   ) : null}
 
+                  {/* Services */}
+                  {activeTab === 'services' ? (
+                    <div className="bv-list-tab bv-list-tab-services">
+                      <div className="bv-tab-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <span className="bv-section-title" style={{ margin: 0 }}>Services ({viewServices.length})</span>
+                      </div>
+                      {isTabDataLoading ? (
+                        <p className="empty-state">Loading services...</p>
+                      ) : viewServices.length === 0 ? (
+                        <p className="empty-state">No services linked to this business yet.</p>
+                      ) : (
+                        <div className="table-shell">
+                          <table className="admin-table bv-detail-table bv-services-table">
+                            <thead>
+                              <tr>
+                                <th>Sr</th>
+                                <th>Service ID</th>
+                                <th>Type</th>
+                                <th>Service Name</th>
+                                <th>Category</th>
+                                <th>Status</th>
+                                <th>Listed On</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {viewServices.map((service, i) => {
+                                const sStatus = service?.approvalStatus || service?.status || '';
+                                const sStatusClass = getStatusPillClass(sStatus);
+                                return (
+                                  <tr key={service?.serviceId || i}>
+                                    <td>{i + 1}</td>
+                                    <td>{service?.serviceId || '-'}</td>
+                                    <td>{service?.serviceType || '-'}</td>
+                                    <td>{service?.serviceName || '—'}</td>
+                                    <td>{service?.category?.name || service?.category?.categoryName || (typeof service?.category === 'string' ? service.category : '—')}</td>
+                                    <td><span className={`status-pill ${sStatusClass}`}>{sStatus || '—'}</span></td>
+                                    <td>{formatDate(service?.createdOn || service?.created_at)}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
                   {/* Subscription */}
                   {activeTab === 'subscription' ? (
                     <div>
@@ -2360,11 +2500,61 @@ function BusinessPage({ token, allowedActions }) {
                         <p className="empty-state">No subscription plans assigned to this business.</p>
                       ) : (
                         <>
-                          {viewSubscriptions.map((sub, i) => {
+                          {viewSubscriptions.length > 1 ? (
+                            <div className="bv-tab-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 10 }}>
+                              <button
+                                type="button"
+                                className="ghost-btn small"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                onClick={() => setShowSubscriptionHistory((prev) => !prev)}
+                                title="View past subscriptions"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <circle cx="12" cy="12" r="9" />
+                                  <path d="M12 7v5l3 3" />
+                                </svg>
+                                {showSubscriptionHistory ? 'Hide History' : `History (${viewSubscriptions.length - 1})`}
+                              </button>
+                            </div>
+                          ) : null}
+                          {showSubscriptionHistory && viewSubscriptions.length > 1 ? (
+                            <div className="table-shell" style={{ marginBottom: 16 }}>
+                              <table className="admin-table bv-detail-table bv-sub-history-table">
+                                <thead>
+                                  <tr>
+                                    <th>Plan</th>
+                                    <th>Status</th>
+                                    <th>Start Date</th>
+                                    <th>Expiry Date</th>
+                                    <th>Amount</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {viewSubscriptions.slice(1).map((sub, i) => {
+                                    const planName = sub?.plan?.name || sub?.plan_name || sub?.planName || '—';
+                                    const planPrice = sub?.amount_paid ?? sub?.amountPaid ?? sub?.plan?.price ?? sub?.plan?.amount ?? sub?.price ?? null;
+                                    return (
+                                      <tr key={sub?.id || i}>
+                                        <td>{planName}</td>
+                                        <td><span className={`status-pill ${normalizeStatus(sub?.status) === 'ACTIVE' ? 'status-verified' : 'status-inactive'}`}>{sub?.status || '—'}</span></td>
+                                        <td>{formatDate(sub?.startDate || sub?.start_date)}</td>
+                                        <td>{formatDate(sub?.endDate || sub?.end_date)}</td>
+                                        <td>{planPrice !== null ? `₹${Number(planPrice).toLocaleString('en-IN')}` : '—'}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : null}
+                          {viewSubscriptions.slice(0, 1).map((sub, i) => {
                             const planName = sub?.plan?.name || sub?.plan_name || sub?.planName || '—';
                             const planPrice = sub?.amount_paid ?? sub?.amountPaid ?? sub?.plan?.price ?? sub?.plan?.amount ?? sub?.price ?? null;
                             const subStatus = normalizeStatus(sub?.status);
-                            const isSubActive = subStatus === 'ACTIVE';
+                            const subEndDate = sub?.endDate || sub?.end_date;
+                            const isExpiredByDate = subEndDate ? new Date(subEndDate).getTime() < Date.now() : false;
+                            const isSubActive = subStatus === 'ACTIVE' && !isExpiredByDate;
+                            const displayStatus = isExpiredByDate && subStatus === 'ACTIVE' ? 'EXPIRED' : (sub?.status || '—');
                             const isPendingActivation = subStatus === 'PENDING_ACTIVATION';
                             // match feature usage for this subscription
                             const subId = sub?.id;
@@ -2386,7 +2576,17 @@ function BusinessPage({ token, allowedActions }) {
                                       Activate Subscription
                                     </button>
                                   ) : null}
-                                  <span className={`status-pill ${isSubActive ? 'status-verified' : 'status-inactive'}`}>{sub?.status || '—'}</span>
+                                  <span className={`status-pill ${isSubActive ? 'status-verified' : 'status-inactive'}`}>{displayStatus}</span>
+                                  {canReassignSubscription ? (
+                                    <button
+                                      type="button"
+                                      className="ghost-btn small"
+                                      onClick={() => openReassignModal(sub)}
+                                      disabled={isReassigningSubscription}
+                                    >
+                                      Change Plan
+                                    </button>
+                                  ) : null}
                                 </div>
                                 <div className="user-detail-grid">
                                   {planPrice !== null ? (
@@ -2972,7 +3172,7 @@ function BusinessPage({ token, allowedActions }) {
                 <p className="user-detail-value">{activationTarget?.status || '-'}</p>
               </div>
             </div>
-            <label className="form-field" style={{ display: 'block' }}>
+            <label className="field">
               <span>Activation Note</span>
               <textarea
                 className="bdt-reject-textarea"
@@ -2989,6 +3189,79 @@ function BusinessPage({ token, allowedActions }) {
               </button>
               <button type="button" className="primary-btn" onClick={handleActivateSubscription} disabled={isActivatingSubscription}>
                 {isActivatingSubscription ? 'Activating...' : 'Confirm Activate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Change Plan / Reassign Subscription Modal ─────────── */}
+      {reassignTarget && (
+        <div className="admin-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="admin-modal confirm-modal">
+            <h3>Change Subscription Plan</h3>
+            <p>
+              Assign a new plan to {viewBusinessProfile?.businessName || getUserName(viewUser)}. The current active
+              subscription (if any) will be marked expired and a new one will start from now.
+            </p>
+            <div style={{ display: 'grid', gap: 14 }}>
+              <label className="field">
+                <span>New Plan</span>
+                <select
+                  value={reassignPlanId}
+                  onChange={(event) => {
+                    setReassignPlanId(event.target.value);
+                    setReassignDurationMonths('1');
+                  }}
+                  disabled={isReassigningSubscription}
+                >
+                  <option value="">Select plan</option>
+                  {reassignPlans
+                    .filter((plan) => Number(plan.is_active) === 1)
+                    .map((plan) => (
+                      <option key={plan.id} value={plan.id}>
+                        {plan.plan_name} ({plan.user_type})
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {reassignPlanId ? (
+                <label className="field">
+                  <span>Duration</span>
+                  {reassignUsesDurationTiers ? (
+                    <select
+                      value={reassignDurationMonths}
+                      onChange={(event) => setReassignDurationMonths(event.target.value)}
+                      disabled={isReassigningSubscription}
+                    >
+                      {reassignDurationOptions.map((option) => (
+                        <option key={option.months} value={option.months}>
+                          {option.months} Month{option.months > 1 ? 's' : ''}
+                          {option.bonus > 0 ? ` + ${option.bonus} free` : ''}
+                          {' — '}{formatCurrency(option.finalAmount)}
+                          {option.discount > 0 ? ` (${option.discount}% off)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="user-detail-value" style={{ margin: 0 }}>
+                      {formatCurrency(Number(selectedReassignPlan?.price) || 0)} for {selectedReassignPlan?.duration_months || 1} month(s) — no duration tiers on this plan.
+                    </p>
+                  )}
+                </label>
+              ) : null}
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn" onClick={closeReassignModal} disabled={isReassigningSubscription}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={handleReassignSubscription}
+                disabled={isReassigningSubscription || !reassignPlanId}
+              >
+                {isReassigningSubscription ? 'Assigning...' : 'Confirm Change'}
               </button>
             </div>
           </div>

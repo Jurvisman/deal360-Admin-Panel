@@ -44,6 +44,7 @@ export { default as EscrowPayoutsPage } from './EscrowPayoutsPage';
 export { default as AdvertisementReviewPage } from './AdvertisementReviewPage';
 export { default as AdvertisementViewPage } from './AdvertisementViewPage';
 export { default as AdPricingConfigPage } from './AdPricingConfigPage';
+export { default as NotificationBroadcastPage } from './NotificationBroadcastPage';
 export { default as AuditLogsPage } from './AuditLogsPage';
 export { default as KycAssistancePage } from './KycAssistancePage';
 export { default as ServicePage } from './ServicePage';

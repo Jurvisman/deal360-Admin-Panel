@@ -47,6 +47,7 @@ import {
   AdvertisementReviewPage,
   AdvertisementViewPage,
   AdPricingConfigPage,
+  NotificationBroadcastPage,
   AuditLogsPage,
   KycAssistancePage,
   ServicePage,
@@ -417,6 +418,12 @@ const ADMIN_META = [
     title: 'Ad Pricing Config',
     breadcrumbs: ['Advertisement', 'Pricing Config'],
     // subtitle: 'Manage hourly base rates and multipliers for the pay-per-ad system.',
+  },
+  {
+    match: '/admin/notifications/broadcast',
+    title: 'Notification Broadcast',
+    breadcrumbs: ['Notifications', 'Broadcast'],
+    type: 'list',
   },
   {
     match: '/admin/orders/purchase',
@@ -984,6 +991,7 @@ function AppRoutes() {
               { path: '/admin/advertisement/pricing', label: 'Pricing Config', icon: ICONS.attributes, tone: NAV_TONES.fields },
             ],
           },
+          { path: '/admin/notifications/broadcast', label: 'Notifications', icon: ICONS.advertisement, tone: NAV_TONES.revenue },
           { path: '/admin/employees', label: 'Employee', icon: ICONS.employee, tone: NAV_TONES.employee },
           {
             key: 'settings-root',
@@ -1994,6 +2002,18 @@ function AppRoutes() {
               fallbackPath={routeFallbackPath}
             >
               <AdvertisementReviewPage token={authToken} />
+            </PermissionGate>
+          }
+        />
+        <Route
+          path="notifications/broadcast"
+          element={
+            <PermissionGate
+              isLoading={isPermissionLoading}
+              isAllowed={canAccessPath('/admin/notifications/broadcast')}
+              fallbackPath={routeFallbackPath}
+            >
+              <NotificationBroadcastPage token={authToken} />
             </PermissionGate>
           }
         />
