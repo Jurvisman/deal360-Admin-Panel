@@ -593,10 +593,23 @@ export const parseGradientList = (value) => {
       // fall back to comma parsing
     }
   }
-  return trimmed
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
+  // Split on commas OUTSIDE parentheses only — a naive full split would chop
+  // "rgba(0,0,0,0.3)" into 4 garbage fragments at its own internal commas.
+  const parts = [];
+  let depth = 0;
+  let current = '';
+  for (const char of trimmed) {
+    if (char === '(') depth += 1;
+    else if (char === ')') depth = Math.max(0, depth - 1);
+    if (char === ',' && depth === 0) {
+      parts.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts.filter(Boolean);
 };
 
 export const buildSectionFormFromConfig = (section, fallbackType) => {
