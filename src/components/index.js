@@ -11,3 +11,4 @@ export { default as TableRowActionMenu } from './TableRowActionMenu';
 export { default as ToggleSwitch } from './ToggleSwitch';
 export { default as DataTable } from './DataTable';
 export { default as SearchableSelect } from './SearchableSelect';
+export { AddressSearchBox, MapPicker, searchNominatim } from './AddressMapPicker';
