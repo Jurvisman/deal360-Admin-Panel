@@ -1,7 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Banner } from '../components';
-import { fetchBusinessDetails, listBusinessTypes, listIndustries, updateBusinessProfile, uploadBannerImages } from '../services/adminApi';
+import { AddressSearchBox, Banner, MapPicker } from '../components';
+import {
+  fetchBusinessDetails,
+  listBusinessTypes,
+  listCities,
+  listCountries,
+  listIndustries,
+  listStates,
+  updateBusinessProfile,
+  uploadBannerImages,
+} from '../services/adminApi';
 
 const getUserName = (user) =>
   user?.name || user?.full_name || user?.fullName || user?.username || user?.mobile || `Business #${user?.id || ''}`;
@@ -54,9 +63,9 @@ const BUSINESS_PROFILE_FIELDS = [
   { key: 'plotNo',              label: 'Plot No' },
   { key: 'landmark',            label: 'Landmark' },
   { key: 'postalCode',          label: 'Postal Code',            required: true },
-  { key: 'countryCode',         label: 'Country Code' },
-  { key: 'stateCode',           label: 'State Code' },
-  { key: 'cityCode',            label: 'City Code' },
+  { key: 'countryCode',         label: 'Country',                type: 'country' },
+  { key: 'stateCode',           label: 'State',                  type: 'state' },
+  { key: 'cityCode',            label: 'City',                   type: 'city' },
   { key: 'latitude',            label: 'Latitude',               type: 'number' },
   { key: 'longitude',           label: 'Longitude',              type: 'number' },
   { key: 'logo',                label: 'Logo URL' },
@@ -275,6 +284,9 @@ function BusinessProfileEditPage({ token }) {
   // Reference data for dropdowns
   const [industries, setIndustries]   = useState([]);
   const [businessTypes, setBusinessTypes] = useState([]);
+  const [countries, setCountries]     = useState([]);
+  const [states, setStates]           = useState([]);
+  const [cities, setCities]           = useState([]);
   const [customHours, setCustomHours] = useState(false);
 
   // Logo upload
@@ -285,11 +297,14 @@ function BusinessProfileEditPage({ token }) {
   const galleryInputRef = useRef(null);
   const [isUploadingGallery, setIsUploadingGallery] = useState(false);
 
-  /* ── Load industries on mount ──────────────────────────────── */
+  /* ── Load industries + countries on mount ────────────────────── */
   useEffect(() => {
     listIndustries(token).then((res) => {
       setIndustries(Array.isArray(res?.data) ? res.data : []);
     }).catch(() => setIndustries([]));
+    listCountries(token).then((res) => {
+      setCountries(Array.isArray(res?.data) ? res.data : []);
+    }).catch(() => setCountries([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -301,6 +316,26 @@ function BusinessProfileEditPage({ token }) {
     }).catch(() => setBusinessTypes([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.businessSegment]);
+
+  // Reload states when countryCode changes — only touches the *option list*, never the
+  // form's own stateCode/cityCode, so hydrating an existing profile's saved code doesn't
+  // get wiped out while the matching reference list is still loading in.
+  useEffect(() => {
+    if (!form.countryCode) { setStates([]); setCities([]); return; }
+    listStates(token, form.countryCode).then((res) => {
+      setStates(Array.isArray(res?.data) ? res.data : []);
+    }).catch(() => setStates([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.countryCode]);
+
+  // Reload cities when stateCode changes — same non-destructive rule as above.
+  useEffect(() => {
+    if (!form.stateCode) { setCities([]); return; }
+    listCities(token, form.stateCode).then((res) => {
+      setCities(Array.isArray(res?.data) ? res.data : []);
+    }).catch(() => setCities([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.stateCode]);
 
   /* ── Load profile ──────────────────────────────────────────── */
   useEffect(() => {
@@ -417,6 +452,79 @@ function BusinessProfileEditPage({ token }) {
     }
   };
 
+  /* ── Map pick ───────────────────────────────────────────────── */
+  const handleMapPick = useCallback((lat, lng) => {
+    handleChange('latitude', lat);
+    handleChange('longitude', lng);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ── Address search result → fill fields (same flow as Business Create) ─── */
+  const handleAddressSelect = useCallback((place) => {
+    const matchCode = (list, nameKey, codeKey, query) => {
+      if (!query) return '';
+      const q = query.toLowerCase().trim();
+      const exact = list.find((i) => (i[nameKey] || '').toLowerCase() === q);
+      if (exact) return exact[codeKey];
+      const partial = list.find((i) => (i[nameKey] || '').toLowerCase().startsWith(q) || q.startsWith((i[nameKey] || '').toLowerCase()));
+      return partial ? partial[codeKey] : '';
+    };
+
+    const newCountry = place.countryCode || 'IN';
+
+    listStates(token, newCountry).then((stRes) => {
+      const stList = Array.isArray(stRes?.data) ? stRes.data : [];
+      setStates(stList);
+      const matchedState = matchCode(stList, 'name', 'code', place.stateCode);
+
+      if (matchedState) {
+        listCities(token, matchedState).then((ctRes) => {
+          const ctList = Array.isArray(ctRes?.data) ? ctRes.data : [];
+          setCities(ctList);
+          const matchedCity = matchCode(ctList, 'name', 'code', place.cityCode);
+          setForm((prev) => ({
+            ...prev,
+            address:     place.address    || prev.address,
+            plotNo:      place.plotNo     || prev.plotNo,
+            landmark:    place.landmark   || prev.landmark,
+            postalCode:  place.postalCode || prev.postalCode,
+            countryCode: newCountry,
+            stateCode:   matchedState,
+            cityCode:    matchedCity || '',
+            latitude:    place.lat || prev.latitude,
+            longitude:   place.lng || prev.longitude,
+          }));
+        }).catch(() => {
+          setForm((prev) => ({
+            ...prev,
+            address: place.address || prev.address, plotNo: place.plotNo || prev.plotNo,
+            landmark: place.landmark || prev.landmark, postalCode: place.postalCode || prev.postalCode,
+            countryCode: newCountry, stateCode: matchedState, cityCode: '',
+            latitude: place.lat || prev.latitude, longitude: place.lng || prev.longitude,
+          }));
+        });
+      } else {
+        setForm((prev) => ({
+          ...prev,
+          address: place.address || prev.address, plotNo: place.plotNo || prev.plotNo,
+          landmark: place.landmark || prev.landmark, postalCode: place.postalCode || prev.postalCode,
+          countryCode: newCountry, stateCode: '', cityCode: '',
+          latitude: place.lat || prev.latitude, longitude: place.lng || prev.longitude,
+        }));
+      }
+    }).catch(() => {
+      setForm((prev) => ({
+        ...prev,
+        address: place.address || prev.address, postalCode: place.postalCode || prev.postalCode,
+        countryCode: newCountry, latitude: place.lat || prev.latitude, longitude: place.lng || prev.longitude,
+      }));
+    });
+
+    const addrKeys = ['address', 'plotNo', 'landmark', 'postalCode', 'cityCode', 'stateCode', 'countryCode', 'latitude', 'longitude'];
+    setTouched((prev) => { const n = { ...prev }; addrKeys.forEach((k) => { n[k] = true; }); return n; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   const saveProfile = async (event) => {
     if (event) event.preventDefault();
     if (!businessProfile?.userId) {
@@ -476,6 +584,14 @@ function BusinessProfileEditPage({ token }) {
 
     let input;
     const fieldType = field.type || 'text';
+
+    // PAN is only mandatory when neither GST nor Aadhaar is present to identify the
+    // business — the static FIELDS config can't express that, so override it here to
+    // match the same rule used in validateForm() (and stop the browser's native
+    // "required" popup from blocking submit when GST/Aadhaar already covers identity).
+    const isPanRequired = field.key === 'businessPan'
+      ? !(form.gstChoice === 'GST' && form.gstNumber?.trim()) && !(form.gstChoice === 'NON_GST' && form.aadhaar?.trim())
+      : Boolean(field.required);
 
     if (fieldType === 'textarea') {
       input = (
@@ -564,6 +680,41 @@ function BusinessProfileEditPage({ token }) {
           onBlur={() => handleBlur(field.key)}
         />
       );
+    } else if (fieldType === 'country') {
+      const countryOptions = countries.map((c) => ({ value: c?.code || '', label: c?.name || c?.code || '' }));
+      input = (
+        <SelectField
+          value={value}
+          onChange={(v) => handleChange(field.key, v)}
+          options={countryOptions}
+          placeholder="— Select country —"
+          onBlur={() => handleBlur(field.key)}
+        />
+      );
+    } else if (fieldType === 'state') {
+      const stateOptions = states.map((s) => ({ value: s?.code || '', label: s?.name || s?.code || '' }));
+      input = (
+        <SelectField
+          value={value}
+          onChange={(v) => handleChange(field.key, v)}
+          options={stateOptions}
+          placeholder={form.countryCode ? '— Select state —' : '— Select country first —'}
+          disabled={!form.countryCode}
+          onBlur={() => handleBlur(field.key)}
+        />
+      );
+    } else if (fieldType === 'city') {
+      const cityOptions = cities.map((c) => ({ value: c?.code || '', label: c?.name || c?.code || '' }));
+      input = (
+        <SelectField
+          value={value}
+          onChange={(v) => handleChange(field.key, v)}
+          options={cityOptions}
+          placeholder={form.stateCode ? '— Select city —' : '— Select state first —'}
+          disabled={!form.stateCode}
+          onBlur={() => handleBlur(field.key)}
+        />
+      );
     } else if (fieldType === 'hours') {
       const selectedPreset = HOURS_PRESETS.find((p) => p.value === value && p.value !== '__custom__')
         ? value : (customHours || (value && !HOURS_PRESETS.find((p) => p.value === value)) ? '__custom__' : '');
@@ -599,7 +750,7 @@ function BusinessProfileEditPage({ token }) {
           value={value}
           step={field.key === 'latitude' || field.key === 'longitude' ? 'any' : undefined}
           onChange={(e) => handleChange(field.key, e.target.value)}
-          required={Boolean(field.required)}
+          required={isPanRequired}
           {...commonProps}
         />
       );
@@ -656,7 +807,7 @@ function BusinessProfileEditPage({ token }) {
           type={htmlType}
           value={value}
           onChange={(e) => handleChange(field.key, e.target.value)}
-          required={Boolean(field.required)}
+          required={isPanRequired}
           {...commonProps}
         />
       );
@@ -669,7 +820,7 @@ function BusinessProfileEditPage({ token }) {
       >
         <span>
           {field.label}
-          {field.required && <span className="field-required"> *</span>}
+          {isPanRequired && <span className="field-required"> *</span>}
         </span>
         {input}
         {showError && <span className="field-error-msg">{error}</span>}
@@ -712,6 +863,28 @@ function BusinessProfileEditPage({ token }) {
                 </button>
               ))}
             </div>
+
+            {activeTab === 'address' ? (
+              <div className="bc-address-tab-intro" style={{ padding: '20px 20px 0' }}>
+                <p className="bc-section-sub">
+                  Search for the business address, then confirm the fields below and adjust the pin on the map.
+                  Country/State/City are picked from the same reference list the app uses, so the saved codes
+                  always match — typing them by hand risks drifting from what's actually in the database.
+                </p>
+                <AddressSearchBox onSelect={handleAddressSelect} />
+                <div className="bc-map-section">
+                  <div className="bc-map-head">
+                    <p className="bc-map-title">Pin on Map</p>
+                    <p className="bc-map-sub">Click to drop a pin · Drag to adjust</p>
+                  </div>
+                  <MapPicker
+                    lat={form.latitude ? Number(form.latitude) : null}
+                    lng={form.longitude ? Number(form.longitude) : null}
+                    onPick={handleMapPick}
+                  />
+                </div>
+              </div>
+            ) : null}
 
             <form id="business-edit-form" className="field-grid business-profile-edit-grid" onSubmit={saveProfile}>
               <input
