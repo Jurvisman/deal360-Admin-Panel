@@ -162,9 +162,13 @@ const validateBusinessForm = (form) => {
     }
   }
 
-  if (!form.businessPan?.trim()) {
-    errors.businessPan = 'PAN number is required.';
-  } else if (!PAN_RE.test(form.businessPan.trim().toUpperCase())) {
+  // PAN is only mandatory on its own when the business has neither GST nor Aadhaar to
+  // identify it — GST encodes a PAN already, and Aadhaar is an accepted alternative proof.
+  const hasGstIdentity = form.gstChoice === 'GST' && form.gstNumber?.trim();
+  const hasAadhaarIdentity = form.gstChoice === 'NON_GST' && form.aadhaar?.trim();
+  if (!hasGstIdentity && !hasAadhaarIdentity && !form.businessPan?.trim()) {
+    errors.businessPan = 'PAN number is required when GST and Aadhaar are both missing.';
+  } else if (form.businessPan?.trim() && !PAN_RE.test(form.businessPan.trim().toUpperCase())) {
     errors.businessPan = 'Invalid PAN. Example: AAAAA0000A';
   }
   if (form.ifscCode?.trim() && !IFSC_RE.test(form.ifscCode.trim().toUpperCase())) {
