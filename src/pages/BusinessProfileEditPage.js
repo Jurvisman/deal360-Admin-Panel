@@ -28,11 +28,6 @@ const HOURS_PRESETS = [
   { label: 'Custom', value: '__custom__' },
 ];
 
-const NATURE_OPTIONS = [
-  'Manufacturer', 'Wholesaler', 'Retailer', 'Distributor', 'Service Provider',
-  'Consultant', 'Importer', 'Exporter', 'Trader', 'Other',
-];
-
 /* ── Field definitions ──────────────────────────────────────────── */
 const BUSINESS_PROFILE_FIELDS = [
   { key: 'businessName',        label: 'Business Name',          required: true, span: true },
@@ -48,7 +43,6 @@ const BUSINESS_PROFILE_FIELDS = [
   { key: 'businessPan',         label: 'Business PAN',           required: true },
   { key: 'aadhaar',             label: 'Aadhaar Number' },
   { key: 'udyam',               label: 'Udyam Registration' },
-  { key: 'nature',              label: 'Nature of Business',     type: 'nature' },
   { key: 'experience',          label: 'Experience' },
   { key: 'hours',               label: 'Business Hours',         type: 'hours' },
   { key: 'serviceArea',         label: 'Service Area' },
@@ -89,7 +83,7 @@ const getEditTabForField = (key) => {
   const generalKeys = new Set([
     'businessName', 'ownerName', 'contactNumber', 'whatsappNumber', 'email',
     'industry', 'businessSegment', 'businessType', 'gstChoice', 'gstNumber', 'businessPan', 'aadhaar', 'udyam',
-    'nature', 'experience', 'hours', 'serviceArea', 'serviceRadius', 'modeOfService',
+    'experience', 'hours', 'serviceArea', 'serviceRadius', 'modeOfService',
     'languagesSupported', 'logo', 'galleryImages', 'website', 'licenseNumber', 'description',
     'primaryCategoryId', 'primarySubCategoryId',
   ]);
@@ -225,6 +219,9 @@ const buildBusinessFormState = (profile) => {
     else if (state.aadhaar) state.gstChoice = 'NON_GST';
   }
   state.galleryImages = Array.isArray(profile?.galleryImages) ? profile.galleryImages : [];
+  // "Nature of Business" is no longer edited here (Business Type covers it), but the backend
+  // overwrites the column on every save — carry the stored value through unchanged.
+  state.nature = profile?.nature ?? null;
   return state;
 };
 
@@ -247,6 +244,7 @@ const buildBusinessPayload = (form) => {
   // gstChoice toggle says doesn't apply, instead of persisting stale leftover data.
   if (form.gstChoice === 'GST') payload.aadhaar = null;
   if (form.gstChoice === 'NON_GST') payload.gstNumber = null;
+  payload.nature = form?.nature ?? null;
   return payload;
 };
 
@@ -657,16 +655,6 @@ function BusinessProfileEditPage({ token }) {
             { value: 'NON_GST', label: 'No GST' },
           ]}
           placeholder="— Select —"
-          onBlur={() => handleBlur(field.key)}
-        />
-      );
-    } else if (fieldType === 'nature') {
-      input = (
-        <SelectField
-          value={value}
-          onChange={(v) => handleChange(field.key, v)}
-          options={NATURE_OPTIONS}
-          placeholder="— Select nature —"
           onBlur={() => handleBlur(field.key)}
         />
       );
