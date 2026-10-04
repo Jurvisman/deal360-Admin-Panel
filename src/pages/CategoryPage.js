@@ -176,7 +176,7 @@ function CategoryPage({ token }) {
   const [message, setMessage]         = useState({ type: 'info', text: '' });
   const [isPageLoading, setIsPageLoading] = useState(false);
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('1');
   const [openActionRowId, setOpenActionRowId] = useState(null);
   const [page, setPage]               = useState(1);
   const [pageSize, setPageSize]       = useState(20);
@@ -405,7 +405,7 @@ function CategoryPage({ token }) {
     setMessage({ type: 'info', text: '' });
     try {
       const [catRes, mainCatRes] = await Promise.allSettled([
-        listCategories(token),
+        listCategories(token, undefined, { includeInactive: true }),
         listMainCategories(token),
       ]);
       if (catRes.status !== 'fulfilled') throw catRes.reason;

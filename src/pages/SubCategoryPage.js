@@ -48,7 +48,7 @@ function SubCategoryPage({ token }) {
   const [isLoading, setIsLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('1');
   const [editItem, setEditItem] = useState(null);
   const [touched, setTouched] = useState({});
   const [openActionRowId, setOpenActionRowId] = useState(null);
@@ -77,7 +77,7 @@ function SubCategoryPage({ token }) {
     setMessage({ type: 'info', text: '' });
     try {
       const [subCategoriesResult, categoriesResult, mainCategoriesResult] = await Promise.allSettled([
-        listSubCategories(token),
+        listSubCategories(token, undefined, { includeInactive: true }),
         listCategories(token),
         listMainCategories(token),
       ]);
