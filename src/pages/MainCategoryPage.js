@@ -44,7 +44,7 @@ function MainCategoryPage({ token }) {
   const [isLoading, setIsLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('1');
   const [editItem, setEditItem] = useState(null);
   const [touched, setTouched] = useState({});
   const [openActionRowId, setOpenActionRowId] = useState(null);
@@ -73,7 +73,7 @@ function MainCategoryPage({ token }) {
     setMessage({ type: 'info', text: '' });
     try {
       const [mainCategoriesResult, industriesResult] = await Promise.allSettled([
-        listMainCategories(token),
+        listMainCategories(token, { includeInactive: true }),
         listIndustries(token),
       ]);
       if (mainCategoriesResult.status !== 'fulfilled') {

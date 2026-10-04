@@ -122,7 +122,14 @@ export const reassignIndustry = (token, id, targetId) =>
   request(`/industries/${id}/reassign`, { method: 'POST', body: { targetId }, token });
 export const deleteIndustry = (token, id) => request(`/industries/${id}`, { method: 'DELETE', token });
 
-export const listMainCategories = (token) => request('/main-categories', { token });
+// Taxonomy lists hide inactive rows (e.g. "[old #id]" rows retired by a merge) unless a page asks for them.
+const withoutInactive = (response, includeInactive) =>
+  includeInactive || !Array.isArray(response?.data)
+    ? response
+    : { ...response, data: response.data.filter((item) => item?.active !== 0 && item?.active !== false) };
+
+export const listMainCategories = async (token, { includeInactive = false } = {}) =>
+  withoutInactive(await request('/main-categories', { token }), includeInactive);
 export const getMainCategory = (token, id) => request(`/main-categories/${id}`, { token });
 export const createMainCategory = (token, payload) =>
   request('/main-categories', { method: 'POST', body: payload, token });
@@ -135,9 +142,9 @@ export const reassignMainCategory = (token, id, targetId) =>
   request(`/main-categories/${id}/reassign`, { method: 'POST', body: { targetId }, token });
 export const deleteMainCategory = (token, id) => request(`/main-categories/${id}`, { method: 'DELETE', token });
 
-export const listCategories = (token, mainCategoryId) => {
+export const listCategories = async (token, mainCategoryId, { includeInactive = false } = {}) => {
   const query = mainCategoryId ? `?mainCategoryId=${mainCategoryId}` : '';
-  return request(`/categories${query}`, { token });
+  return withoutInactive(await request(`/categories${query}`, { token }), includeInactive);
 };
 export const getCategory = (token, id) => request(`/categories/${id}`, { token });
 export const createCategory = (token, payload) => request('/categories', { method: 'POST', body: payload, token });
@@ -161,9 +168,9 @@ export const updateProductCollection = (token, id, payload) =>
 export const deleteProductCollection = (token, id) =>
   request(`/collections/${id}`, { method: 'DELETE', token });
 
-export const listSubCategories = (token, categoryId) => {
+export const listSubCategories = async (token, categoryId, { includeInactive = false } = {}) => {
   const query = categoryId ? `?categoryId=${categoryId}` : '';
-  return request(`/sub-categories${query}`, { token });
+  return withoutInactive(await request(`/sub-categories${query}`, { token }), includeInactive);
 };
 export const getSubCategory = (token, id) => request(`/sub-categories/${id}`, { token });
 export const createSubCategory = (token, payload) =>
