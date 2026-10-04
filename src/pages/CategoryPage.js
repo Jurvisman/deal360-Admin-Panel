@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Banner, DataTable, TableRowActionMenu, TaxonomyDeleteImpactDialog } from '../components';
+import { Banner, DataTable, ImageUrlInput, TableRowActionMenu, TaxonomyDeleteImpactDialog } from '../components';
 import { usePermissions } from '../shared/permissions';
 import {
   createAttributeDefinition,
@@ -1187,24 +1187,20 @@ function CategoryPage({ token }) {
                     <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
                       Icon URL
                     </label>
-                    <input
-                      type="text"
+                    <ImageUrlInput
+                      token={token}
                       value={form.categoryIcon}
-                      onChange={(e) => setForm((p) => ({ ...p, categoryIcon: e.target.value }))}
-                      placeholder="https://..."
-                      style={{ width: '100%', boxSizing: 'border-box' }}
+                      onChange={(url) => setForm((p) => ({ ...p, categoryIcon: url }))}
                     />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
                       Banner URL
                     </label>
-                    <input
-                      type="text"
+                    <ImageUrlInput
+                      token={token}
                       value={form.imageUrl}
-                      onChange={(e) => setForm((p) => ({ ...p, imageUrl: e.target.value }))}
-                      placeholder="https://..."
-                      style={{ width: '100%', boxSizing: 'border-box' }}
+                      onChange={(url) => setForm((p) => ({ ...p, imageUrl: url }))}
                     />
                   </div>
                   <div style={{ paddingBottom: 6 }}>

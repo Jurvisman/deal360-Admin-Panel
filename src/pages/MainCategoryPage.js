@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Banner, DataTable, TableRowActionMenu, TaxonomyDeleteImpactDialog, ToggleSwitch } from '../components';
+import { Banner, DataTable, ImageUrlInput, TableRowActionMenu, TaxonomyDeleteImpactDialog, ToggleSwitch } from '../components';
 import { usePermissions } from '../shared/permissions';
 import {
   createMainCategory,
@@ -568,24 +568,20 @@ function MainCategoryPage({ token }) {
                       <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
                         Icon URL
                       </label>
-                      <input
-                        type="text"
+                      <ImageUrlInput
+                        token={token}
                         value={form.mainCategoryIcon}
-                        onChange={(event) => handleChange('mainCategoryIcon', event.target.value)}
-                        placeholder="https://..."
-                        style={{ width: '100%', boxSizing: 'border-box' }}
+                        onChange={(url) => handleChange('mainCategoryIcon', url)}
                       />
                     </div>
                     <div className="field">
                       <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
                         Banner Image URL
                       </label>
-                      <input
-                        type="text"
+                      <ImageUrlInput
+                        token={token}
                         value={form.imageUrl}
-                        onChange={(event) => handleChange('imageUrl', event.target.value)}
-                        placeholder="https://..."
-                        style={{ width: '100%', boxSizing: 'border-box' }}
+                        onChange={(url) => handleChange('imageUrl', url)}
                       />
                     </div>
                   </div>
