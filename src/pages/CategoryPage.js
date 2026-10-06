@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Banner, DataTable, ImageUrlInput, TableRowActionMenu, TaxonomyDeleteImpactDialog } from '../components';
+import { Banner, DataTable, ImageUrlInput, SearchableSelect, TableRowActionMenu, TaxonomyDeleteImpactDialog } from '../components';
 import { usePermissions } from '../shared/permissions';
 import {
   createAttributeDefinition,
@@ -1120,18 +1120,25 @@ function CategoryPage({ token }) {
                     <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
                       Main Category <span style={{ color: '#ef4444' }}>*</span>
                     </label>
-                    <select
+                    <SearchableSelect
                       value={form.mainCategoryId}
-                      onChange={(e) => setForm((p) => ({ ...p, mainCategoryId: e.target.value }))}
-                      onBlur={() => setTouched((p) => ({ ...p, mainCategoryId: true }))}
-                      className={fieldErr('mainCategoryId') ? 'input-error' : ''}
-                      style={{ width: '100%', boxSizing: 'border-box' }}
-                    >
-                      <option value="">Select main category</option>
-                      {mainCategories.map((mc) => (
-                        <option key={mc.id} value={mc.id}>{buildMainCategoryOptionLabel(mc)}</option>
-                      ))}
-                    </select>
+                      onChange={(value) => {
+                        setForm((p) => ({ ...p, mainCategoryId: value }));
+                        setTouched((p) => ({ ...p, mainCategoryId: true }));
+                      }}
+                      options={[...mainCategories]
+                        .sort((a, b) => buildMainCategoryOptionLabel(a).localeCompare(buildMainCategoryOptionLabel(b)))
+                        .map((mc) => ({
+                          value: mc.id,
+                          label: mc.name,
+                          subLabel: mc.industryName || undefined,
+                          searchText: buildMainCategoryOptionLabel(mc),
+                        }))}
+                      placeholder="Select main category"
+                      searchPlaceholder="Search main category or industry…"
+                      emptyLabel="No main categories"
+                      hasError={Boolean(fieldErr('mainCategoryId'))}
+                    />
                     {fieldErr('mainCategoryId') && <span className="field-error-msg">{errors.mainCategoryId}</span>}
                   </div>
                 </div>

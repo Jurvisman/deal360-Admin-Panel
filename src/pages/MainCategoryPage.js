@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Banner, DataTable, ImageUrlInput, TableRowActionMenu, TaxonomyDeleteImpactDialog, ToggleSwitch } from '../components';
+import { Banner, DataTable, ImageUrlInput, SearchableSelect, TableRowActionMenu, TaxonomyDeleteImpactDialog, ToggleSwitch } from '../components';
 import { usePermissions } from '../shared/permissions';
 import {
   createMainCategory,
@@ -498,20 +498,20 @@ function MainCategoryPage({ token }) {
                       <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
                         Industry <span style={{ color: '#ef4444' }}>*</span>
                       </label>
-                      <select
+                      <SearchableSelect
                         value={form.industryId}
-                        onChange={(event) => handleChange('industryId', event.target.value)}
-                        onBlur={() => handleBlur('industryId')}
-                        className={fieldErr('industryId') ? 'input-error' : ''}
-                        style={{ width: '100%', boxSizing: 'border-box' }}
-                      >
-                        <option value="">Select industry</option>
-                        {industries.map((industry) => (
-                          <option key={industry.id} value={industry.id}>
-                            {industry.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(value) => {
+                          handleChange('industryId', value);
+                          handleBlur('industryId');
+                        }}
+                        options={[...industries]
+                          .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+                          .map((industry) => ({ value: industry.id, label: industry.name }))}
+                        placeholder="Select industry"
+                        searchPlaceholder="Search industry…"
+                        emptyLabel="No industries"
+                        hasError={Boolean(fieldErr('industryId'))}
+                      />
                       {fieldErr('industryId') && <span className="field-error-msg">{errors.industryId}</span>}
                     </div>
                   </div>
