@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Banner, DataTable, ImageUrlInput, TableRowActionMenu, TaxonomyDeleteImpactDialog, ToggleSwitch } from '../components';
+import { Banner, DataTable, ImageUrlInput, SearchableSelect, TableRowActionMenu, TaxonomyDeleteImpactDialog, ToggleSwitch } from '../components';
 import { usePermissions } from '../shared/permissions';
 import {
   createSubCategory,
@@ -509,20 +509,30 @@ function SubCategoryPage({ token }) {
                       <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
                         Category <span style={{ color: '#ef4444' }}>*</span>
                       </label>
-                      <select
+                      <SearchableSelect
                         value={form.categoryId}
-                        onChange={(event) => handleChange('categoryId', event.target.value)}
-                        onBlur={() => handleBlur('categoryId')}
-                        className={fieldErr('categoryId') ? 'input-error' : ''}
-                        style={{ width: '100%', boxSizing: 'border-box' }}
-                      >
-                        <option value="">Select category</option>
-                        {categories.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {buildCategoryOptionLabel(category, mainCategoryById)}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(value) => {
+                          handleChange('categoryId', value);
+                          handleBlur('categoryId');
+                        }}
+                        options={[...categories]
+                          .map((category) => {
+                            const path = buildCategoryOptionLabel(category, mainCategoryById);
+                            return {
+                              value: category.id,
+                              label: category.name,
+                              // "Industry > Main category" under the name; search matches the full path.
+                              subLabel: path.split(' > ').slice(0, -1).join(' › ') || undefined,
+                              searchText: path,
+                              sortKey: path,
+                            };
+                          })
+                          .sort((a, b) => a.sortKey.localeCompare(b.sortKey))}
+                        placeholder="Select category"
+                        searchPlaceholder="Search category, main category or industry…"
+                        emptyLabel="No categories"
+                        hasError={Boolean(fieldErr('categoryId'))}
+                      />
                       {fieldErr('categoryId') && <span className="field-error-msg">{errors.categoryId}</span>}
                     </div>
                   </div>
