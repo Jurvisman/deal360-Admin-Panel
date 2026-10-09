@@ -12,4 +12,5 @@ export { default as ToggleSwitch } from './ToggleSwitch';
 export { default as ImageUrlInput } from './ImageUrlInput';
 export { default as DataTable } from './DataTable';
 export { default as SearchableSelect } from './SearchableSelect';
+export { default as DurationTierRows } from './DurationTierRows';
 export { AddressSearchBox, MapPicker, searchNominatim } from './AddressMapPicker';

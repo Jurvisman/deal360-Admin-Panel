@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Banner } from '../components';
+import { Banner, DurationTierRows } from '../components';
 import {
   createSubscriptionPlan,
   listSubscriptionFeatures,
@@ -53,6 +53,9 @@ const initialForm = {
   duration_12m_discount_percent: '0',
   duration_12m_bonus_months: '0',
   offer_ends_at: '',
+  duration_3m_price: '',
+  duration_6m_price: '',
+  duration_12m_price: '',
 };
 
 const USER_TYPES = [
@@ -176,6 +179,9 @@ function SubscriptionPlanCreatePage({ token }) {
       duration_12m_discount_percent: plan.duration_12m_discount_percent ?? '0',
       duration_12m_bonus_months: plan.duration_12m_bonus_months ?? '0',
       offer_ends_at: utcIsoToLocalInput(plan.offer_ends_at),
+      duration_3m_price: plan.duration_3m_price ?? '',
+      duration_6m_price: plan.duration_6m_price ?? '',
+      duration_12m_price: plan.duration_12m_price ?? '',
     });
     const rows = (plan.features || []).map((feature) =>
       createFeatureRow({
@@ -296,6 +302,9 @@ function SubscriptionPlanCreatePage({ token }) {
       duration_12m_discount_percent: toNumber(form.duration_12m_discount_percent) ?? 0,
       duration_12m_bonus_months: toNumber(form.duration_12m_bonus_months) ?? 0,
       offer_ends_at: localInputToUtcIso(form.offer_ends_at),
+      duration_3m_price: toNumber(form.duration_3m_price) ?? 0,
+      duration_6m_price: toNumber(form.duration_6m_price) ?? 0,
+      duration_12m_price: toNumber(form.duration_12m_price) ?? 0,
       features: featureRows
         .filter((row) => row.feature_id)
         .map((row) => ({
@@ -736,82 +745,13 @@ function SubscriptionPlanCreatePage({ token }) {
                       <option value="1">On - show 1 / 3 / 6 / 12 month tiles at checkout</option>
                     </select>
                   </label>
-                  <div className="field-grid" style={{ opacity: form.duration_pricing_enabled === '1' ? 1 : 0.5 }}>
-                    <label className="field">
-                      <span>3 month - discount %</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={form.duration_3m_discount_percent}
-                        onChange={(event) => handleChange('duration_3m_discount_percent', event.target.value)}
-                        disabled={form.duration_pricing_enabled !== '1'}
-                        placeholder="0"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>3 month - bonus months</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="24"
-                        value={form.duration_3m_bonus_months}
-                        onChange={(event) => handleChange('duration_3m_bonus_months', event.target.value)}
-                        disabled={form.duration_pricing_enabled !== '1'}
-                        placeholder="0"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>6 month - discount %</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={form.duration_6m_discount_percent}
-                        onChange={(event) => handleChange('duration_6m_discount_percent', event.target.value)}
-                        disabled={form.duration_pricing_enabled !== '1'}
-                        placeholder="0"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>6 month - bonus months</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="24"
-                        value={form.duration_6m_bonus_months}
-                        onChange={(event) => handleChange('duration_6m_bonus_months', event.target.value)}
-                        disabled={form.duration_pricing_enabled !== '1'}
-                        placeholder="0"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>12 month - discount %</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={form.duration_12m_discount_percent}
-                        onChange={(event) => handleChange('duration_12m_discount_percent', event.target.value)}
-                        disabled={form.duration_pricing_enabled !== '1'}
-                        placeholder="0"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>12 month - bonus months</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="24"
-                        value={form.duration_12m_bonus_months}
-                        onChange={(event) => handleChange('duration_12m_bonus_months', event.target.value)}
-                        disabled={form.duration_pricing_enabled !== '1'}
-                        placeholder="0"
-                      />
-                    </label>
-                  </div>
+                  <DurationTierRows
+                    form={form}
+                    onChange={handleChange}
+                    disabled={form.duration_pricing_enabled !== '1'}
+                  />
                   <small style={{ color: '#8a8fa8', fontSize: 11 }}>
-                    Fill either field per row - leave the other at 0. Coupons apply to the 1 month plan only.
+                    Pick one way per row. Fixed price is the total for all those months (e.g. 3 months = 699).
                   </small>
                   <label className="field" style={{ marginTop: 10, maxWidth: 320 }}>
                     <span>Launch offer ends on (optional)</span>
