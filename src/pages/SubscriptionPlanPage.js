@@ -9,6 +9,21 @@ import {
   updateSubscriptionPlan,
 } from '../services/adminApi';
 
+// Offer end date: the admin types IST local time; the API stores/returns UTC ISO ("...Z").
+const utcIsoToLocalInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const localInputToUtcIso = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+};
+
+
 const initialForm = {
   plan_name: '',
   user_type: 'BUSINESS',
@@ -38,6 +53,7 @@ const initialForm = {
   duration_6m_bonus_months: '0',
   duration_12m_discount_percent: '0',
   duration_12m_bonus_months: '0',
+  offer_ends_at: '',
 };
 
 const USER_TYPES = [
@@ -245,6 +261,7 @@ function SubscriptionPlanPage({ token }) {
       duration_6m_bonus_months: toNumber(form.duration_6m_bonus_months) ?? 0,
       duration_12m_discount_percent: toNumber(form.duration_12m_discount_percent) ?? 0,
       duration_12m_bonus_months: toNumber(form.duration_12m_bonus_months) ?? 0,
+      offer_ends_at: localInputToUtcIso(form.offer_ends_at),
       features: featureRows
         .filter((row) => row.feature_id)
         .map((row) => ({
@@ -340,6 +357,7 @@ function SubscriptionPlanPage({ token }) {
       duration_6m_bonus_months: plan.duration_6m_bonus_months ?? '0',
       duration_12m_discount_percent: plan.duration_12m_discount_percent ?? '0',
       duration_12m_bonus_months: plan.duration_12m_bonus_months ?? '0',
+      offer_ends_at: utcIsoToLocalInput(plan.offer_ends_at),
     });
     const rows = (plan.features || []).map((feature) =>
       createFeatureRow({
@@ -981,6 +999,18 @@ function SubscriptionPlanPage({ token }) {
                   <small style={{ color: '#8a8fa8', fontSize: 11 }}>
                     Fill either field per row - leave the other at 0. Coupons apply to the 1 month plan only.
                   </small>
+                  <label className="field" style={{ marginTop: 10, maxWidth: 320 }}>
+                    <span>Launch offer ends on (optional)</span>
+                    <input
+                      type="datetime-local"
+                      value={form.offer_ends_at || ''}
+                      onChange={(event) => handleChange('offer_ends_at', event.target.value)}
+                      disabled={form.duration_pricing_enabled !== '1'}
+                    />
+                    <small style={{ color: '#8a8fa8', fontSize: 11 }}>
+                      The website shows a countdown to this time. After it, the 3/6/12 month discounts stop. Leave empty for no deadline.
+                    </small>
+                  </label>
                 </div>
 
                 {editingId ? (

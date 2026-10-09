@@ -2185,7 +2185,7 @@ function BusinessPage({ token, allowedActions }) {
                     // ── Required docs per entity type ────────────────────────────
                     // Each entry: { id, label, urlKey, verifiedKey, verifiedLabel, metaKey, required }
                     const ALL_DOCS = {
-                      aadhaarFront:   { id: 'aadhaarFront',   label: 'Aadhaar — Front',        url: pick('aadhaarFrontDocUrl','aadhaar_front_doc_url'),   verified: pickBool('aadhaarVerified','aadhaar_verified'),   verifiedLabel: 'Aadhaar Verified' },
+                      aadhaarFront:   { id: 'aadhaarFront',   label: 'Aadhaar — Front',        url: pick('aadhaarFrontDocUrl','aadhaar_front_doc_url'),   verified: pickBool('aadhaarVerified','aadhaar_verified'),   verifiedLabel: 'Aadhaar Verified', meta: pick('aadhaar','aadhaar_number') },
                       aadhaarBack:    { id: 'aadhaarBack',    label: 'Aadhaar — Back',         url: pick('aadhaarBackDocUrl','aadhaar_back_doc_url'),    verified: pickBool('aadhaarVerified','aadhaar_verified') },
                       pan:            { id: 'pan',            label: 'PAN Card',               url: pick('panDocUrl','pan_doc_url'),                     verified: pickBool('panVerified','pan_verified'),           verifiedLabel: 'PAN Verified',    meta: pick('businessPan','business_pan') },
                       gst:            { id: 'gst',            label: 'GST Certificate',        url: pick('gstDocUrl','gst_doc_url'),                     verified: pickBool('gstVerified','gst_verified'),           verifiedLabel: 'GST Verified',    meta: pick('gstNumber','gst_number') },
