@@ -767,6 +767,48 @@ export const updateSupportTicketStatus = (token, id, payload) =>
 export const getDashboardOverview = (token) =>
   request('/admin/dashboard/overview', { token });
 
+// ── Website Blog ───────────────────────────────────────────────
+export const fetchBlogPosts = (token) => request('/admin/blog/posts', { token });
+
+export const fetchBlogPost = (token, id) => request(`/admin/blog/posts/${id}`, { token });
+
+export const createBlogPost = (token, payload) =>
+  request('/admin/blog/posts', { method: 'POST', body: payload, token });
+
+export const updateBlogPost = (token, id, payload) =>
+  request(`/admin/blog/posts/${id}`, { method: 'PUT', body: payload, token });
+
+export const publishBlogPost = (token, id) =>
+  request(`/admin/blog/posts/${id}/publish`, { method: 'POST', token });
+
+export const unpublishBlogPost = (token, id) =>
+  request(`/admin/blog/posts/${id}/unpublish`, { method: 'POST', token });
+
+export const deleteBlogPost = (token, id) =>
+  request(`/admin/blog/posts/${id}`, { method: 'DELETE', token });
+
+export const uploadBlogImage = async (token, file) => {
+  const headers = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const body = new FormData();
+  body.append('file', file);
+
+  const response = await fetch(buildUrl('/admin/blog/upload-image'), {
+    method: 'POST',
+    headers,
+    body,
+  });
+
+  if (!response.ok) {
+    const err = new Error(await parseError(response));
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+};
+
 // ── Admin Notification Broadcasts ──────────────────────────────
 export const uploadBroadcastBanner = async (token, file) => {
   const headers = {};

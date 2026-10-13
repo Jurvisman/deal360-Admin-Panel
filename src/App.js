@@ -56,6 +56,7 @@ import {
   StorefrontWebsiteRequestsPage,
   WaitlistLeadsPage,
   WebsiteCmsPage,
+  BlogPage,
   LeadManagementPage,
 } from './pages';
 import { fetchMyPermissions } from './services/adminApi';
@@ -372,6 +373,10 @@ const ADMIN_META = [
   {
     match: '/admin/website-cms',
     title: 'Website CMS',
+  },
+  {
+    match: '/admin/blog',
+    title: 'Blog',
   },
   {
     match: '/admin/timezones',
@@ -1006,6 +1011,7 @@ function AppRoutes() {
           },
           { path: '/admin/app-config', label: 'CMS', icon: ICONS.appConfig, tone: NAV_TONES.appConfig },
           { path: '/admin/website-cms', label: 'Website CMS', icon: ICONS.appConfig, tone: NAV_TONES.appConfig },
+          { path: '/admin/blog', label: 'Blog', icon: ICONS.appConfig, tone: NAV_TONES.appConfig },
           {
             key: 'location-root',
             label: 'Location',
@@ -1873,6 +1879,21 @@ function AppRoutes() {
               fallbackPath={routeFallbackPath}
             >
               <WebsiteCmsPage token={authToken} />
+            </PermissionGate>
+          }
+        />
+        <Route
+          path="blog"
+          element={
+            <PermissionGate
+              isLoading={isPermissionLoading}
+              isAllowed={
+                canAccessPath('/admin/blog') &&
+                allowedActionCodes.has('ADMIN_BLOG_READ')
+              }
+              fallbackPath={routeFallbackPath}
+            >
+              <BlogPage token={authToken} />
             </PermissionGate>
           }
         />
