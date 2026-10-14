@@ -5,13 +5,13 @@ import { CATEGORIES } from './blogMarkdown';
 
 const CTA_COPY = {
   en: {
-    listing: ['Bring your shop to Deal360', 'Free listing, leads from nearby buyers and online payments in one app.', 'Start free'],
+    listing: ['Bring your shop to Deal360', 'Free listing, leads from nearby buyers and online payments in one app.', 'Start here'],
     app: ['Get daily leads from nearby buyers', 'Thousands of local businesses grow with the Deal360 app.', 'Download app'],
     demo: ['Want to see how Deal360 works?', 'Book a free 15-minute demo with our team.', 'Book free demo'],
     whatsapp: ['Have a question?', 'Talk to the Deal360 team on WhatsApp.', 'Chat on WhatsApp'],
   },
   gu: {
-    listing: ['તમારી દુકાન Deal360 પર લાવો', 'ફ્રી લિસ્ટિંગ, નજીકના ગ્રાહકોની લીડ્સ અને ઓનલાઇન પેમેન્ટ, એક જ એપમાં.', 'ફ્રીમાં શરૂ કરો'],
+    listing: ['તમારી દુકાન Deal360 પર લાવો', 'ફ્રી લિસ્ટિંગ, નજીકના ગ્રાહકોની લીડ્સ અને ઓનલાઇન પેમેન્ટ, એક જ એપમાં.', 'અહીંથી શરૂ કરો'],
     app: ['રોજ નજીકના ગ્રાહકોની લીડ્સ મેળવો', 'હજારો લોકલ બિઝનેસ Deal360 એપથી આગળ વધી રહ્યા છે.', 'એપ ડાઉનલોડ કરો'],
     demo: ['Deal360 કેવી રીતે કામ કરે છે તે જોવું છે?', 'અમારી ટીમ સાથે 15 મિનિટનો ફ્રી ડેમો બુક કરો.', 'ફ્રી ડેમો બુક કરો'],
     whatsapp: ['કોઈ સવાલ છે?', 'Deal360 ટીમ સાથે WhatsApp પર વાત કરો.', 'WhatsApp પર વાત કરો'],
