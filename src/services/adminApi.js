@@ -98,6 +98,8 @@ export const updateBusinessProfileStatus = (token, profileId, status, rejectionR
   });
 
 export const listIndustries = (token) => request('/industries', { token });
+// Public list the mobile app reads (no admin permission needed); active=false returns all industries.
+export const listHierarchyIndustries = () => request('/hierarchy/industries?active=false');
 export const getIndustry = (token, id) => request(`/industries/${id}`, { token });
 export const sendOtp    = (mobileNumber) => request('/users/send-otp',   { method: 'POST', body: { mobileNumber } });
 export const verifyOtp  = (mobileNumber, otpCode) => request('/users/verify-otp', { method: 'POST', body: { mobileNumber, otpCode } });

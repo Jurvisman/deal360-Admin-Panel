@@ -35,10 +35,12 @@ import {
   fetchBusinesses,
   fetchBusinessDetails,
   listIndustries,
+  listHierarchyIndustries,
   listMainCategories,
   listProductCollections,
   listProducts,
   createIndustry,
+  updateIndustryOrder,
   publishAppConfig,
   rollbackAppConfig,
   saveAppConfigDraft,
@@ -525,6 +527,8 @@ function AppConfigPage({ token }) {
   const [clonePageId, setClonePageId] = useState('');
   const [clonePageRoute, setClonePageRoute] = useState('');
   const [showManageTabs, setShowManageTabs] = useState(false);
+  const [reorderingIndustryId, setReorderingIndustryId] = useState(null);
+  const [industriesError, setIndustriesError] = useState('');
   const [activePanel, setActivePanel] = useState(null);
   const [showEditor, setShowEditor] = useState(false);
   const [showAdvancedFields, setShowAdvancedFields] = useState(false);
@@ -726,43 +730,53 @@ function AppConfigPage({ token }) {
     });
   }, [pages, industries]);
 
-  const currentTabs = useMemo(() => {
-    const tabs = configSnapshot?.navigation?.topCategoryTabs;
-    return Array.isArray(tabs) ? tabs : [];
-  }, [configSnapshot]);
+  // Header pills in the app follow the industry `ordering` from /api/hierarchy/industries,
+  // not navigation.topCategoryTabs — so tab order is edited on the industries directly.
+  const tabIndustries = useMemo(() => industries.filter((ind) => ind?.active !== 0), [industries]);
+  const hiddenIndustries = useMemo(() => industries.filter((ind) => ind?.active === 0), [industries]);
 
-  const handleMoveTab = (fromIndex, direction) => {
-    const config = getConfigForBuilder();
-    if (!config) return;
-    const next = cloneConfig(config);
-    if (!next.navigation || !Array.isArray(next.navigation.topCategoryTabs)) return;
-    const tabs = next.navigation.topCategoryTabs;
-    const toIndex = fromIndex + direction;
-    if (toIndex < 0 || toIndex >= tabs.length) return;
-    const temp = tabs[fromIndex];
-    tabs[fromIndex] = tabs[toIndex];
-    tabs[toIndex] = temp;
-    updateConfigFromBuilder(next, 'Tab order updated. Remember to save draft.');
-  };
+  const handleMoveIndustry = async (index, direction) => {
+    if (reorderingIndustryId) return;
+    const current = tabIndustries[index];
+    const neighbour = tabIndustries[index + direction];
+    if (!current || !neighbour) return;
+    const industryId = current?.industryId ?? current?.id;
+    // Backend positions count inactive industries too, so take the neighbour's real slot.
+    const neighbourOrdering = Number(neighbour?.ordering);
+    const position =
+      Number.isFinite(neighbourOrdering) && neighbourOrdering >= 1
+        ? neighbourOrdering
+        : industries.indexOf(neighbour) + 1;
+    if (!industryId || position < 1) return;
 
-  const handleRemoveTab = (index) => {
-    const config = getConfigForBuilder();
-    if (!config) return;
-    const next = cloneConfig(config);
-    if (!next.navigation || !Array.isArray(next.navigation.topCategoryTabs)) return;
-    const tab = next.navigation.topCategoryTabs[index];
-    const tabLabel = tab?.label || tab?.id || 'tab';
-    setConfirmAction({
-      title: 'Remove Tab',
-      message: `Remove the "${tabLabel}" tab from navigation? The linked page will not be deleted.`,
-      confirmLabel: 'Remove',
-      variant: 'danger',
-      onConfirm: () => {
-        setConfirmAction(null);
-        next.navigation.topCategoryTabs.splice(index, 1);
-        updateConfigFromBuilder(next, `Tab "${tabLabel}" removed. Remember to save draft.`);
-      },
-    });
+    const previous = industries;
+    setIndustries((prev) =>
+      prev
+        .map((item) => {
+          if (item === current) return { ...item, ordering: neighbour.ordering };
+          if (item === neighbour) return { ...item, ordering: current.ordering };
+          return item;
+        })
+        .sort((a, b) => (a?.ordering ?? 0) - (b?.ordering ?? 0))
+    );
+    setReorderingIndustryId(industryId);
+    try {
+      await updateIndustryOrder(token, industryId, position);
+      setMessage({
+        type: 'success',
+        text: `${resolveIndustryLabel(current)} moved ${direction < 0 ? 'up' : 'down'}. Live in the app now — no publish needed.`,
+      });
+      await loadIndustries();
+    } catch (error) {
+      setIndustries(previous);
+      const text =
+        error?.status === 401 || error?.status === 403
+          ? 'You need the "Industry update" permission to change tab order. Ask a super admin to grant it.'
+          : error.message || 'Failed to update industry order.';
+      setMessage({ type: 'error', text });
+    } finally {
+      setReorderingIndustryId(null);
+    }
   };
 
   const sensors = useSensors(
@@ -1078,15 +1092,30 @@ function AppConfigPage({ token }) {
   };
 
   const loadIndustries = async () => {
+    const sortByOrdering = (items) =>
+      Array.isArray(items) ? [...items].sort((a, b) => (a?.ordering ?? 0) - (b?.ordering ?? 0)) : [];
+    let adminError = null;
     try {
       const response = await listIndustries(token);
-      const items = response?.data;
-      const sorted = Array.isArray(items)
-        ? [...items].sort((a, b) => (a?.ordering ?? 0) - (b?.ordering ?? 0))
-        : [];
+      const sorted = sortByOrdering(response?.data);
+      if (sorted.length) {
+        setIndustries(sorted);
+        setIndustriesError('');
+        return;
+      }
+    } catch (error) {
+      adminError = error;
+    }
+    // Admin list failed (e.g. missing Industry permission) — fall back to the public list the app uses.
+    try {
+      const response = await listHierarchyIndustries();
+      const items = Array.isArray(response) ? response : response?.data;
+      const sorted = sortByOrdering(items);
       setIndustries(sorted);
+      setIndustriesError(sorted.length ? '' : adminError?.message || 'No industries returned by the server.');
     } catch (error) {
       setIndustries([]);
+      setIndustriesError(adminError?.message || error.message || 'Failed to load industries.');
     }
   };
 
@@ -4409,50 +4438,73 @@ function AppConfigPage({ token }) {
           </div>
         ) : null}
 
-        {showManageTabs && configSnapshot ? (
+        {showManageTabs ? (
           <div className="manage-pages-panel">
             <div className="manage-pages-section" style={{ flex: '1 1 100%' }}>
-              <h4 className="manage-pages-heading">Navigation Tabs (Header Pills)</h4>
-              {currentTabs.length > 0 ? (
+              <div className="tab-order-head">
+                <h4 className="manage-pages-heading">Industry Tab Order</h4>
+                <span className="tab-order-live">Saves instantly · no publish needed</span>
+              </div>
+              <p className="field-help">
+                Order of the industry pills in the app header. Use &#9650; &#9660; to move an industry — the change is saved
+                right away. Users see the new order when they reopen the app or pull to refresh.
+              </p>
+              {tabIndustries.length > 0 ? (
                 <div className="tab-manager-list">
-                  {currentTabs.map((tab, index) => (
-                    <div key={tab?.id || index} className="tab-manager-row">
-                      <span className="tab-label">{tab?.label || tab?.id}</span>
-                      <span className="tab-route">{tab?.route}</span>
-                      <div className="tab-manager-actions">
-                        <button
-                          type="button"
-                          className="ghost-btn small"
-                          onClick={() => handleMoveTab(index, -1)}
-                          disabled={index === 0}
-                          title="Move up"
-                        >
-                          &#9650;
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-btn small"
-                          onClick={() => handleMoveTab(index, 1)}
-                          disabled={index === currentTabs.length - 1}
-                          title="Move down"
-                        >
-                          &#9660;
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-btn small danger"
-                          onClick={() => handleRemoveTab(index)}
-                          title="Remove tab"
-                        >
-                          &#10005;
-                        </button>
+                  {tabIndustries.map((industry, index) => {
+                    const industryId = industry?.industryId ?? industry?.id;
+                    const isSaving = reorderingIndustryId != null && String(reorderingIndustryId) === String(industryId);
+                    const icon = typeof industry?.industryIcon === 'string' && /^https?:\/\//.test(industry.industryIcon)
+                      ? industry.industryIcon
+                      : '';
+                    return (
+                      <div key={industryId ?? index} className={`tab-manager-row${isSaving ? ' is-saving' : ''}`}>
+                        <span className="tab-position">{index + 1}</span>
+                        {icon ? <img className="tab-icon" src={icon} alt="" /> : null}
+                        <span className="tab-label">{resolveIndustryLabel(industry)}</span>
+                        <span className="tab-route">{isSaving ? 'Saving…' : ''}</span>
+                        <div className="tab-manager-actions">
+                          <button
+                            type="button"
+                            className="ghost-btn small"
+                            onClick={() => handleMoveIndustry(index, -1)}
+                            disabled={index === 0 || reorderingIndustryId != null}
+                            title="Move up"
+                            aria-label={`Move ${resolveIndustryLabel(industry)} up`}
+                          >
+                            &#9650;
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-btn small"
+                            onClick={() => handleMoveIndustry(index, 1)}
+                            disabled={index === tabIndustries.length - 1 || reorderingIndustryId != null}
+                            title="Move down"
+                            aria-label={`Move ${resolveIndustryLabel(industry)} down`}
+                          >
+                            &#9660;
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+                </div>
+              ) : industriesError ? (
+                <div className="tab-order-error">
+                  <span>Could not load industries: {industriesError}</span>
+                  <button type="button" className="ghost-btn small" onClick={loadIndustries}>
+                    Retry
+                  </button>
                 </div>
               ) : (
-                <p className="field-help">No navigation tabs configured. Use "Ensure Header Pages" to generate tabs from industries.</p>
+                <p className="field-help">No active industries yet. Add or activate one from the Industries page.</p>
               )}
+              {hiddenIndustries.length > 0 ? (
+                <p className="field-help tab-order-hidden">
+                  Hidden in app (inactive): {hiddenIndustries.map((ind) => resolveIndustryLabel(ind)).join(', ')}. Activate
+                  them from the Industries page to show them here.
+                </p>
+              ) : null}
             </div>
           </div>
         ) : null}

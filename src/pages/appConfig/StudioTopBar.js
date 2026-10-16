@@ -72,10 +72,10 @@ export const StudioTopBar = ({
           type="button"
           className={`studio-btn studio-btn-outline ${showManageTabs ? 'is-active' : ''}`}
           onClick={onToggleManageTabs}
-          title="Manage Tabs"
+          title="Reorder industry tabs in the app header"
         >
           <StudioIcons.ManageTabs />
-          <span>Manage Tabs</span>
+          <span>Tab Order</span>
         </button>
 
         <div className="version-dropdown-wrap" ref={versionDropdownRef} style={{ position: 'relative' }}>
