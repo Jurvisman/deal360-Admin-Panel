@@ -684,7 +684,7 @@ function SubscriptionPlanCreatePage({ token }) {
                     onChange={(event) => handleChange('waitlist_enabled', event.target.value)}
                   >
                     <option value="0">Direct checkout</option>
-                    <option value="1">Open waitlist form</option>
+                    <option value="1">Talk to our team (WhatsApp)</option>
                   </select>
                 </label>
                 <label className="field">
